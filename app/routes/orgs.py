@@ -49,19 +49,15 @@ async def list_orgs():
     try:
         cursor = db_module.db.organizations.find({}, {"_id": 0})  # remove MongoDB ObjectId
         orgs = []
-
         async for doc in cursor:
             orgs.append(serialize_org(doc))
-
         logger.info(f"Fetched {len(orgs)} organizations")
-
         return {
             "success": True,
             "message": "Organizations fetched successfully",
             "count": len(orgs),
             "items": orgs,
         }
-
     except Exception as e:
-        logger.error(f"Failed to fetch organizations: {str(e)}")
+        logger.error(f"Failed to fetch organizations: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch organizations")
