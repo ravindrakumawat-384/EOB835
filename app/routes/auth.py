@@ -1,0 +1,327 @@
+from typing import Any
+from fastapi import APIRouter, HTTPException, status, Depends, Body
+from pydantic import BaseModel, EmailStr
+from datetime import datetime
+import app.common.db.db as db_module
+from ..utils.auth_utils import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    create_refresh_token,
+    create_reset_token,
+    decode_token,
+)
+from ..services.email_service import send_email_stub, send_reset_email
+from ..common.config import settings
+from ..common.db.models import OrganizationMembership
+from fastapi import Request
+import bson
+from bson import ObjectId
+
+
+from ..utils.logger import get_logger
+logger = get_logger(__name__)
+
+router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+class RegisterRequest(BaseModel):
+    email: EmailStr
+    password: str
+    full_name: str | None = None
+
+
+class UserDetails(BaseModel):
+    id: str | None = None
+    email: str | None = None
+    full_name: str | None = None
+    org_id: str | None = None
+    role: str | None = None
+
+# class OrganizationDetails(BaseModel):
+#     org_id: str | None = None
+#     role: str | None = None
+
+class TokenResponse(BaseModel):
+    msg: str
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: UserDetails | None = None
+    # organization: OrganizationDetails | None = None
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class RequestResetRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+class LogoutRequest(BaseModel):
+    refresh_token: str
+
+class LogoutRequest(BaseModel):
+    refresh_token: str
+
+
+async def _get_user_by_email(email: str) -> dict | None:
+    return await db_module.db.users.find_one({"email": email})
+
+
+async def _get_user_by_id(user_id: str) -> dict | None:
+    return await db_module.db.users.find_one({"id": user_id})
+
+
+@router.post("/register", status_code=status.HTTP_201_CREATED)
+async def register(payload: RegisterRequest) -> Any:
+    existing = await _get_user_by_email(payload.email)
+    if existing:
+        raise HTTPException(status_code=400, detail="User already exists")
+
+    user_doc = {
+        "email": payload.email,
+        "password_hash": hash_password(payload.password),
+        "full_name": payload.full_name,
+        "is_active": True,
+        "created_at": datetime.utcnow(),
+        "updated_at": datetime.utcnow(),
+        # generate id consistent with earlier model (we used uuid4 str in models.py)
+        "id": payload.email + "-" + str(int(datetime.utcnow().timestamp())),  # small dev id
+    }
+    await db_module.db.users.insert_one(user_doc)
+    # For convenience, create a refresh token entry
+    access = create_access_token(user_doc["id"])
+    refresh = create_refresh_token(user_doc["id"])
+    # persist the refresh token (by jti) for rotation / blacklisting
+    decoded_refresh = decode_token(refresh)
+    refresh_doc = {
+        "jti": decoded_refresh.get("jti"),
+        "user_id": user_doc["id"],
+        "created_at": datetime.utcnow(),
+        "expires_at": datetime.fromtimestamp(decoded_refresh.get("exp")),
+    }
+    await db_module.db.refresh_tokens.insert_one(refresh_doc)
+    return {"message": "user created", "access_token": access, "refresh_token": refresh}
+
+
+@router.post("/login", response_model=TokenResponse)
+async def login(payload: LoginRequest) -> Any:
+    user = await _get_user_by_email(payload.email)
+    if not user or not verify_password(payload.password, user["password_hash"]):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    if not user.get("is_active", True):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User inactive")
+
+    access = create_access_token(user["id"])
+    refresh = create_refresh_token(user["id"])
+
+    # store refresh token (rotation)
+    dec = decode_token(refresh)
+    refresh_doc = {
+        "jti": dec.get("jti"),
+        "user_id": user["id"],
+        "created_at": datetime.utcnow(),
+        "expires_at": datetime.fromtimestamp(dec.get("exp")),
+    }
+    await db_module.db.refresh_tokens.insert_one(refresh_doc)
+
+    expires_in = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    # Add user details to response
+    user_details = {
+        "id": user.get("id"),
+        "email": user.get("email"),
+        "full_name": user.get("full_name"),
+    }
+    # org_details = OrganizationMembership.find_one({"email": user["email"]})
+
+    user_id = user.get("id")
+    print("User ID:", user_id)
+
+    # org_details = db_module.db.organization_memberships.find_one({"user_id": user_id})
+    org_details = await db_module.db.organization_memberships.find_one(
+    {"user_id": user_id}
+)
+
+    # org_details = db_module.db.users.find_one({"user_id": user_id})
+    
+    print("Organization Details:", org_details)
+
+    # if org_details:
+    org_id = org_details.get("org_id")
+    role = org_details.get("role")
+    print("Organization ID:", org_id)
+    print("Role:", role)
+
+    organization_details = {
+        "org_id": org_id,
+        "role": role,
+    }
+
+    print("Organization Details to return:", organization_details)
+    print("Organization Details to return:", organization_details)
+
+    return {
+        "msg": "Login Successful",
+        "access_token": access,
+        "refresh_token": refresh,
+        "expires_in": expires_in,
+        "user": user_details,
+        "organization": organization_details
+    }
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh(payload: RefreshRequest) -> Any:
+    try:
+        decoded = decode_token(payload.refresh_token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+    if decoded.get("type") != "refresh":
+        raise HTTPException(status_code=401, detail="Invalid token type")
+
+    jti = decoded.get("jti")
+    # check refresh token exists (rotation / blacklist)
+    stored = await db_module.db.refresh_tokens.find_one({"jti": jti})
+    if not stored:
+        raise HTTPException(status_code=401, detail="Refresh token revoked or not found")
+
+    user_id = decoded.get("sub")
+    # rotate: delete old refresh, issue a new one
+    await db_module.db.refresh_tokens.delete_one({"jti": jti})
+    new_refresh = create_refresh_token(user_id)
+    new_dec = decode_token(new_refresh)
+    await db_module.db.refresh_tokens.insert_one(
+        {
+            "jti": new_dec.get("jti"),
+            "user_id": user_id,
+            "created_at": datetime.utcnow(),
+            "expires_at": datetime.fromtimestamp(new_dec.get("exp")),
+        }
+    )
+    access = create_access_token(user_id)
+    expires_in = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    return {"access_token": access, "refresh_token": new_refresh, "expires_in": expires_in}
+
+
+@router.post("/request-password-reset")
+async def request_password_reset(payload: RequestResetRequest) -> Any:
+    user = await _get_user_by_email(payload.email)
+    # Always return success to avoid user enumeration
+
+    if not user:
+        # For non-existent users, just log (do not send real email)
+        await send_email_stub(
+            to_email=payload.email,
+            subject="Password reset request",
+            template_name="password_reset_requested",
+            payload={"note": "user not found"},
+        )
+        return {"message": "If an account exists, a reset email was sent."}
+
+    token = create_reset_token(user["id"])
+    logger.info(f"Reset Token generated: {token}")
+
+    # Send real email with token
+    sent = send_reset_email(user["email"], token)
+    if not sent:
+        # Optionally, log or handle email send failure
+        await send_email_stub(
+            to_email=user["email"],
+            subject="Password reset link (FAILED TO SEND)",
+            template_name="password_reset",
+            payload={"note": "SMTP send failed", "user_id": user["id"]},
+        )
+    # return {"message": "If an account exists, a reset email was sent."}
+    return {"message": "Email Send Successfully."}
+
+
+@router.post("/reset-password")
+async def reset_password(payload: ResetPasswordRequest) -> Any:
+    # verify token
+    try:
+        from datetime import datetime
+        now_utc = datetime.utcnow()
+        logger.info(f"[reset-password] current UTC: {now_utc} ({int(now_utc.timestamp())})")
+        logger.info(f"Reset Token provided: {payload.token}")
+        token_clean = payload.token.strip()
+        logger.info(f"JWT Secret: {settings.JWT_SECRET}")
+        logger.info(f"JWT Algorithm: {settings.JWT_ALGORITHM}")
+        logger.info(f"Decoding token: {token_clean}")
+        decoded = decode_token(token_clean)
+        logger.info(f"Decoded reset token: {decoded}")
+        iat = decoded.get("iat")
+        exp = decoded.get("exp")
+        if iat:
+            logger.info(f"[reset-password] iat: {iat} ({datetime.utcfromtimestamp(iat)})")
+        if exp:
+            logger.info(f"[reset-password] exp: {exp} ({datetime.utcfromtimestamp(exp)})")
+    except Exception as exc:
+        import traceback
+        logger.error(f"JWT decode error: {type(exc).__name__} {str(exc)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=400, detail=f"Invalid or expired token: {type(exc).__name__}: {str(exc)}")
+
+    if decoded.get("type") != "reset":
+        raise HTTPException(status_code=400, detail="Invalid token type")
+
+    user_id = decoded.get("sub")
+    user = await _get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=400, detail="User not found")
+
+    # update password
+    new_hash = hash_password(payload.new_password)
+    await db_module.db.users.update_one({"id": user_id}, {"$set": {"password_hash": new_hash, "updated_at": datetime.utcnow()}})
+
+    # Optionally, revoke all refresh tokens for this user (security)
+    await db_module.db.refresh_tokens.delete_many({"user_id": user_id})
+
+    # log email event that password was changed (dev notification)
+    await send_email_stub(
+        to_email=user["email"],
+        subject="Your password was changed",
+        template_name="password_changed",
+        payload={"user_id": user_id},
+    )
+
+    return {"message": "Password changed successfully"}
+
+
+
+
+# Logout endpoint
+@router.post("/logout")
+async def logout(payload: LogoutRequest, request: Request):
+    """
+    Invalidate the provided refresh token (logout user).
+    """
+    try:
+        decoded = decode_token(payload.refresh_token)
+        if decoded.get("type") != "refresh":
+            logger.warning("Logout attempted with non-refresh token.")
+            raise HTTPException(status_code=400, detail="Invalid token type for logout.")
+        jti = decoded.get("jti")
+        # Remove the refresh token from DB (blacklist/rotation)
+        result = await db_module.db.refresh_tokens.delete_one({"jti": jti})
+        if result.deleted_count == 0:
+            logger.info(f"Logout: refresh token not found or already invalidated (jti={jti})")
+        else:
+            logger.info(f"Logout: refresh token invalidated (jti={jti})")
+        return {"message": "Logged out successfully."}
+    except Exception as exc:
+        logger.error(f"Logout error: {type(exc).__name__}: {str(exc)}")
+        raise HTTPException(status_code=400, detail=f"Logout failed: {type(exc).__name__}: {str(exc)}")
