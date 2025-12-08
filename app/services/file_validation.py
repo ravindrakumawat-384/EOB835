@@ -2,8 +2,8 @@ import hashlib
 from typing import Optional
 
 def calculate_file_hash(content: bytes) -> str:
-    """Calculate SHA256 hash of file content."""
-    return hashlib.sha256(content).hexdigest()
+    """Calculate MD5 hash of file content."""
+    return hashlib.md5(content).hexdigest()
 
 # Dummy in-memory hash store for demonstration (replace with DB lookup)
 _uploaded_hashes = set()

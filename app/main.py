@@ -61,6 +61,10 @@ app.include_router(debug.router)
 #claims
 app.include_router(claims.router)
 
+#template
+from .routes import template
+app.include_router(template.router)
+
 #generate_835
 def _import_generate_835():
     try:

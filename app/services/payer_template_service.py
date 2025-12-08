@@ -63,6 +63,139 @@ def check_template_match(payer_id: str, claim_keys: List[str]) -> Optional[str]:
     # For now, simulate template matching
     return 'matched'  # or 'mismatch' based on actual comparison
 
+
+def find_payer_by_name(payer_name: str, org_id: str) -> Optional[str]:
+    """
+    Return payer id if a payer with the given name exists for the org, otherwise None.
+    """
+    conn = get_pg_conn()
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM payers WHERE name = %s AND org_id = %s", (payer_name, org_id))
+    result = cur.fetchone()
+    cur.close()
+    conn.close()
+    if result:
+        return result[0]
+    return None
+
+
+def get_template_version_for_payer(payer_id: str) -> Optional[str]:
+    """
+    Return the current template version id (template_versions.id) for the payer if exists, otherwise None.
+    """
+    conn = get_pg_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT tv.id
+            FROM templates t
+            JOIN template_versions tv ON t.current_version_id = tv.id
+            WHERE t.payer_id = %s AND t.status = 'active'
+            ORDER BY tv.created_at DESC
+            LIMIT 1
+        """, (payer_id,))
+        result = cur.fetchone()
+        if result:
+            return result[0]
+        return None
+    finally:
+        cur.close()
+        conn.close()
+
+
+def get_template_version_by_mongo_doc_id(mongo_doc_id: str) -> Optional[str]:
+    """
+    Given a mongo_doc_id stored on template_versions.mongo_doc_id, return the template_versions.id
+    """
+    conn = get_pg_conn()
+    cur = conn.cursor()
+    try:
+        # Try exact match first
+        cur.execute("SELECT id FROM template_versions WHERE mongo_doc_id = %s LIMIT 1", (mongo_doc_id,))
+        res = cur.fetchone()
+        if res:
+            return res[0]
+
+        # Try matching by LIKE in case types differ (ObjectId vs string)
+        like_pattern = f"%{mongo_doc_id}%"
+        cur.execute("SELECT id FROM template_versions WHERE mongo_doc_id::text LIKE %s LIMIT 1", (like_pattern,))
+        res = cur.fetchone()
+        return res[0] if res else None
+    finally:
+        cur.close()
+        conn.close()
+
+
+def keys_match_template(extracted_keys: List[str], template_dynamic_keys: List[str], threshold: float = 0.6) -> bool:
+    """
+    Simple key overlap matcher. Returns True if the fraction of matched keys >= threshold.
+    """
+    if not template_dynamic_keys:
+        return False
+    extracted_set = set([k.lower() for k in extracted_keys if k])
+    template_set = set([k.lower() for k in template_dynamic_keys if k])
+    if not extracted_set:
+        return False
+    matched = extracted_set.intersection(template_set)
+    frac = len(matched) / max(1, len(template_set))
+    return frac >= threshold
+
+
+def ai_compare_keys(extracted_keys: List[str], template_keys: List[str], model: str = "gpt-4o-mini") -> Dict[str, Any]:
+    """
+    Use an AI model to compare two sets of keys and return a match decision and confidence.
+
+    Returns a dict: {"match": bool, "confidence": float, "reason": str}
+    """
+    try:
+        # Lazy import to avoid hard dependency unless used
+        import os
+        import openai
+
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            return {"match": False, "confidence": None, "reason": "no_api_key"}
+
+        client = openai.OpenAI(api_key=api_key)
+
+        prompt = f"""
+You are given two lists of JSON field keys. Decide whether these two sets represent the same template structure.
+Output JSON only with fields: match (true/false), confidence (0-100), reason (short).
+
+Extracted keys: {extracted_keys}
+Template keys: {template_keys}
+
+Consider synonyms and common variations. Be conservative. Provide confidence as integer percentage.
+"""
+
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=200
+        )
+
+        content = response.choices[0].message.content.strip()
+        # Try to parse JSON from model response
+        import json
+        try:
+            parsed = json.loads(content)
+            match = bool(parsed.get('match'))
+            confidence = float(parsed.get('confidence')) if parsed.get('confidence') is not None else None
+            reason = parsed.get('reason') or ''
+            return {"match": match, "confidence": confidence, "reason": reason}
+        except Exception:
+            # If model didn't return JSON, do a best-effort parse
+            # Look for a number in the text as confidence
+            import re
+            m = re.search(r"(\d{1,3})(?:%| percent)?", content)
+            confidence = float(m.group(1)) if m else None
+            match = confidence is not None and confidence >= 60
+            return {"match": match, "confidence": confidence, "reason": content[:200]}
+
+    except Exception as e:
+        return {"match": False, "confidence": None, "reason": f"ai_error:{e}"}
+
 def store_claims_in_postgres(file_id: str, flat_claims: List[Dict[str, Any]], org_id: str) -> List[str]:
     """
     Store EACH claim as a SEPARATE record in PostgreSQL claims table.
