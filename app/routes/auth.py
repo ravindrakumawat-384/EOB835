@@ -1,3 +1,4 @@
+
 from typing import Any
 from fastapi import APIRouter, HTTPException, status, Depends, Body
 from pydantic import BaseModel, EmailStr
@@ -14,6 +15,7 @@ from ..utils.auth_utils import (
 from ..services.email_service import send_email_stub, send_reset_email
 from ..common.config import settings
 from ..common.db.models import OrganizationMembership
+from ..services.auth_deps import get_current_user
 from fastapi import Request
 import bson
 from bson import ObjectId
@@ -72,8 +74,10 @@ class ResetPasswordRequest(BaseModel):
 class LogoutRequest(BaseModel):
     refresh_token: str
 
-class LogoutRequest(BaseModel):
-    refresh_token: str
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
 
 
 async def _get_user_by_email(email: str) -> dict | None:
@@ -159,16 +163,18 @@ async def login(payload: LoginRequest) -> Any:
     
     print("Organization Details:", org_details)
 
-    # if org_details:
-    org_id = org_details.get("org_id")
-    role = org_details.get("role")
-    print("Organization ID:", org_id)
-    print("Role:", role)
+    if org_details:
+        org_id = org_details.get("org_id")
+        role = org_details.get("role")
+        print("Organization ID:", org_id)
+        print("Role:", role)
 
-    organization_details = {
-        "org_id": org_id,
-        "role": role,
-    }
+        organization_details = {
+            "org_id": org_id,
+            "role": role,
+        }
+    else:
+        organization_details = "N/A"
 
     print("Organization Details to return:", organization_details)
     print("Organization Details to return:", organization_details)
@@ -325,3 +331,55 @@ async def logout(payload: LogoutRequest, request: Request):
     except Exception as exc:
         logger.error(f"Logout error: {type(exc).__name__}: {str(exc)}")
         raise HTTPException(status_code=400, detail=f"Logout failed: {type(exc).__name__}: {str(exc)}")
+    
+
+# change-password endpoint
+@router.post("/change-password")
+# async def change_password(payload: ChangePasswordRequest, user: dict = Depends(get_current_user)):
+async def change_password(payload: ChangePasswordRequest):
+    """
+    Allow authenticated user to change their password.
+    Verifies old password, updates to new password, and revokes all refresh tokens for security.
+    """
+    try:
+        print("etner in change password api")
+        # user_id = "228fd9e9-7b5e-42aa-9ebb-922a35a4c12f"
+        user_id = "ea9a6357-c306-4c28-bea9-b557498793a8"
+        
+        try:
+            user = await _get_user_by_id(user_id)
+            print("User fetched for change password:", user)
+            print("user[id]", user["id"])
+        except:
+            print("user not found")
+            print("user not found")
+           
+            
+        
+        # Verify old password
+        if not verify_password(payload.old_password, user["password_hash"]):
+            logger.warning(f"Change password failed: invalid old password for user {user['id']}")
+            raise HTTPException(status_code=400, detail="Invalid old password")
+
+        # Update password
+        new_hash = hash_password(payload.new_password)
+        await db_module.db.users.update_one({"id": user["id"]}, {"$set": {"password_hash": new_hash, "updated_at": datetime.utcnow()}})
+
+        # Revoke all refresh tokens for this user
+        await db_module.db.refresh_tokens.delete_many({"user_id": user["id"]})
+
+        # Log email event (dev notification)
+        await send_email_stub(
+            to_email=user["email"],
+            subject="Your password was changed",
+            template_name="password_changed",
+            payload={"user_id": user["id"]},
+        )
+
+        logger.info(f"Password changed successfully for user {user['id']}")
+        return {"message": "Password changed successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Change password error: {type(e).__name__}: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to change password")

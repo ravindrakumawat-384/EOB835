@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from .common.db.db import init_db, db
-from .routes import auth, orgs, settings_users, settings_general, settings_audit_logs, settings_notifications
+from .routes import auth, orgs, settings_users, settings_general, settings_audit_logs, settings_notifications, settings_profile
 from app.common.config import settings
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
@@ -45,6 +45,7 @@ app.include_router(orgs.router)
 
 app.include_router(settings_users.router)
 app.include_router(settings_general.router)
+app.include_router(settings_profile.router)
 app.include_router(settings_audit_logs.router)
 app.include_router(settings_notifications.router)
 
