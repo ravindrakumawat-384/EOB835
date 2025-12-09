@@ -1,6 +1,14 @@
 from pydantic import BaseSettings, Field
 from functools import lru_cache
 from typing import Optional
+from dotenv import load_dotenv
+import os
+# Load environment variables from .env file
+load_dotenv()
+    
+# Get OpenAI API key from environment variable (.env file)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
 
 class Settings(BaseSettings):
     MONGO_URI: str = "mongodb://localhost:27017"
@@ -21,11 +29,12 @@ class Settings(BaseSettings):
     CORS_ORIGINS: Optional[str] = "*"
 
     # AWS S3 Configuration
-    S3_BUCKET = "eob-dev-bucket"
-    AWS_ACCESS_KEY_ID = "AKIA2GG23YNROAFON7PD"
-    AWS_SECRET_ACCESS_KEY = "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"
-    AWS_REGION = "ap-south-1"
- 
+    S3_BUCKET = os.getenv("S3_BUCKET")
+    AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+    AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+    AWS_REGION = os.getenv("AWS_REGION")
+
+    
     #Openai key
     OPENAI_API_KEY = ""
 
