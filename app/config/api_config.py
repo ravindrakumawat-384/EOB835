@@ -6,10 +6,10 @@ Set your API keys and other configuration here
 class APIConfig:
     # OpenAI Configuration
     # Get your API key from: https://platform.openai.com/api-keys
-    OPENAI_API_KEY = "sk-your-actual-api-key-here"  # Replace with your actual key
+    OPENAI_API_KEY = ""  # Replace with your actual key
     
     # OpenAI Model Settings
-    OPENAI_MODEL = "gpt-4o-mini"
+    OPENAI_MODEL = ""
     OPENAI_TEMPERATURE = 0.1
     OPENAI_MAX_TOKENS = 3000
     
@@ -17,7 +17,7 @@ class APIConfig:
     AWS_ACCESS_KEY_ID = "your-aws-key"
     AWS_SECRET_ACCESS_KEY = "your-aws-secret"
     AWS_REGION = "us-east-1"
-    S3_BUCKET = "eob-dev-bucket"
+    S3_BUCKET = ""
     
     # Database Configuration
     MONGODB_URL = "mongodb://localhost:27017/"
