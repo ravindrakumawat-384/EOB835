@@ -1,21 +1,34 @@
-from pydantic import BaseModel, Field
-from enum import Enum
 from typing import Any, Dict, List, Optional
+from pydantic import BaseModel
 
-# --- response models ---
+
+class DropdownOption(BaseModel):
+    label: str
+    value: Any
+
+class EditableDropdown(BaseModel):
+    type: str
+    placeholder: Optional[str] = None
+    options: List[DropdownOption] = []
+
+class ActionItem(BaseModel):
+    type: str
+    icon: Optional[str] = None
+    styleClass: Optional[str] = None
+
 class TableHeader(BaseModel):
     field: Optional[str] = None
     label: str
-    actions: Optional[List[Dict[str, Any]]] = None
+    editable: Optional[EditableDropdown] = None
+    actions: Optional[List[ActionItem]] = None
 
 class TableRow(BaseModel):
     fileName: str
-    payer: Optional[str]
+    payer: Optional[str] = None
     confidence: str
     status: str
-    reviewer: Optional[str]
-    uploaded: Optional[str]
-    claims: int
+    reviewer: Optional[str] = None
+    uploaded: Optional[str] = None
 
 class ReviewResponse(BaseModel):
     tableHeaders: List[TableHeader]
