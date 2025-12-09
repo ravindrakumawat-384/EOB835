@@ -143,41 +143,35 @@ async def login(payload: LoginRequest) -> Any:
     await db_module.db.refresh_tokens.insert_one(refresh_doc)
 
     expires_in = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
-    # Add user details to response
-    user_details = {
-        "id": user.get("id"),
-        "email": user.get("email"),
-        "full_name": user.get("full_name"),
-    }
     # org_details = OrganizationMembership.find_one({"email": user["email"]})
 
     user_id = user.get("id")
     print("User ID:", user_id)
 
     # org_details = db_module.db.organization_memberships.find_one({"user_id": user_id})
-    org_details = await db_module.db.organization_memberships.find_one(
-    {"user_id": user_id}
-)
-
-    # org_details = db_module.db.users.find_one({"user_id": user_id})
-    
-    print("Organization Details:", org_details)
+    org_details = await db_module.db.organization_memberships.find_one({"user_id": user_id})
 
     if org_details:
         org_id = org_details.get("org_id")
         role = org_details.get("role")
-        print("Organization ID:", org_id)
-        print("Role:", role)
 
-        organization_details = {
-            "org_id": org_id,
-            "role": role,
-        }
     else:
-        organization_details = "N/A"
+        print(" N/A")
+        org_id = "N/A"
+        role = "N/A"
 
-    print("Organization Details to return:", organization_details)
-    print("Organization Details to return:", organization_details)
+    print("org_id------>>>> ", org_id)
+    print("role------>>>> ", role)
+
+    # Add user details to response
+    user_details = {
+        "id": user.get("id"),
+        "email": user.get("email"),
+        "full_name": user.get("full_name"),
+        "org_id": org_id,
+        "role": role,
+    }
+
 
     return {
         "msg": "Login Successful",
@@ -185,7 +179,6 @@ async def login(payload: LoginRequest) -> Any:
         "refresh_token": refresh,
         "expires_in": expires_in,
         "user": user_details,
-        "organization": organization_details
     }
 
 
@@ -342,17 +335,13 @@ async def change_password(payload: ChangePasswordRequest):
     Verifies old password, updates to new password, and revokes all refresh tokens for security.
     """
     try:
-        print("etner in change password api")
-        # user_id = "228fd9e9-7b5e-42aa-9ebb-922a35a4c12f"
-        user_id = "ea9a6357-c306-4c28-bea9-b557498793a8"
+        user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
         
         try:
             user = await _get_user_by_id(user_id)
-            print("User fetched for change password:", user)
-            print("user[id]", user["id"])
         except:
-            print("user not found")
-            print("user not found")
+            logger.error(f"User not found: {user_id}")
+            raise HTTPException(status_code=404, detail="User not found")
            
             
         

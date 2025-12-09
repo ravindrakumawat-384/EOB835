@@ -27,35 +27,30 @@ def clean_mongo_doc(doc):
 
 
 
-@router.get("/", response_model=Dict[str, Any])
+@router.get("", response_model=Dict[str, Any])
 # async def read_general_settings(user: Dict[str, Any] = Depends(get_current_user)):
 async def read_general_settings():
     try:
-        logger.info("Fetching general settings for user")
-        
-        user_id = "8d8b7dff-a988-41ed-a63d-d59eb6d9ac0d"
+        logger.info("Fetching general settings for user")        
+        user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
+
         logger.debug(f"User ID: {user_id}")
         
         time_zone = "pt"  # Default time zone
         # time_zone = datetime.utcnow()
-        print(f"Time Zone: {time_zone}")
 
         # user = await db_module.db.users.find_one({"user_id": user_id})
         # logger.debug(f"User: {user}")
         # org_id = user.get("organization_id") or user.get("org_id")
 
         membership = await db_module.db.organization_memberships.find_one({"user_id": user_id})
-        role = membership.get("role")
-        print(f"User Role: {role}")
-        org_id = membership.get("org_id") 
-        print(f"org_id: {org_id}")
 
+        role = membership.get("role")
+        org_id = membership.get("org_id") 
         org = await db_module.db.organizations.find_one({"id": org_id})
         org = clean_mongo_doc(org)
-
-        print(f"Organization: {org}")
         org_name = org.get("name") if org else None
-        print("org_name", org_name)
+
         # org_id = org.get("id") if org else None
         # cfg = await get_org_settings(org_id)
         # print(f"General Settings: {org}")
@@ -67,11 +62,10 @@ async def read_general_settings():
         logger.info("General settings fetched successfully for org_id: %s", org_id)
 
         rp = await db_module.db.retention_policies.find_one({"org_id": org_id})
-        print(f"Retention Policy: {rp}")
-        retention_days = int(rp.get("retention_days")/30)
         
-
-        # return org_name
+        # retention_days = int(rp.get("retention_days")/30)
+        retention_days = str(rp.get("retention_days"))
+        
 
         organization = {
             "name": org_name,
@@ -84,7 +78,7 @@ async def read_general_settings():
 
         retention = {
             # "retentionPolicy" : f"{retention_days} Months",
-            "retention_days" : str(retention_days),
+            "retention_days" : retention_days,
         }
 
         generalSettings = {
@@ -92,6 +86,7 @@ async def read_general_settings():
             "retention": retention,
         }
 
+        logger.debug(f"General Settings Data: {generalSettings}")
         return {
             "generalSettings": generalSettings,
             "org_id": org_id,
@@ -106,41 +101,23 @@ async def read_general_settings():
 
 
 # @router.put("/", dependencies=[Depends(require_role(["Admin"]))])
-@router.patch("/")
+@router.patch("")
 async def patch_general_settings(payload: Dict[str, Any]):
     try:
-        logger.info("Patching general settings for user")
-        print("-------------------------------")
-        print("payload:", payload)
-        print("-------------------------------")
-        user_id = "8d8b7dff-a988-41ed-a63d-d59eb6d9ac0d"
-        
+        user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
         membership = await db_module.db.organization_memberships.find_one({"user_id": user_id})
-        print("membership:", membership)
-        # role = membership.get("role")
-        org_id = membership.get("org_id")
-        # logger.debug(f"User ID: {user_id}, Role: {role}, Org ID: {org_id}")
-        org = await db_module.db.organizations.find_one({"id": org_id})
 
-        # org = clean_mongo_doc(org)
-        # print(f"Cleaned Org Data: {org}")
+        org_id = membership.get("org_id")
+        org = await db_module.db.organizations.find_one({"id": org_id})
 
         if not org:
             logger.warning("Organization not found for org_id: %s", org_id)
             raise HTTPException(status_code=404, detail="Organization not found")
 
-        # time_zone = datetime.utcnow()
-
         rp = await db_module.db.retention_policies.find_one({"org_id": org_id})
-        # print(f"Retention Policy get : {rp}")
-        retention_days = rp.get("retention_days")
-        print("retention_days---> ", retention_days)
-
-        # org["name"] = payload.get("personalInformation")
 
         update_data = {}
         rp_update_data = {}
-
     
         update_data["name"] = payload["organization"]["name"]
         update_data["timezone"] = payload["organization"]["timezone"]
@@ -148,10 +125,9 @@ async def patch_general_settings(payload: Dict[str, Any]):
       
         if update_data:
             await db_module.db.organizations.update_one({"id": org_id}, {"$set": update_data})
+
         if rp_update_data:
-            print("enter in Rp udpate block")
             await db_module.db.retention_policies.update_one({"org_id": org_id}, {"$set": rp_update_data})
-            logger.info(f"General settings updated for org_id: {org_id}")
 
         # payload["org_id"] = org_id
         # updated = await upsert_org_settings(payload)
@@ -162,6 +138,8 @@ async def patch_general_settings(payload: Dict[str, Any]):
                     "retention": rp_update_data,
         }
 
+        logger.debug(f"Updated General Settings Data: {generalSettings}")
+        
         return {
             "generalSettings": generalSettings,
             # "org_id": org_id,

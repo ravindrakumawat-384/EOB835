@@ -1,42 +1,37 @@
 from pydantic import BaseSettings, Field
 from functools import lru_cache
 from typing import Optional
+
 from dotenv import load_dotenv
 import os
-# Load environment variables from .env file
+
 load_dotenv()
-    
-# Get OpenAI API key from environment variable (.env file)
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 
 class Settings(BaseSettings):
     MONGO_URI: str = "mongodb://localhost:27017"
-    MONGO_DB: str = "eob_db"
+    MONGO_DB: str = "eob_db_test"
     APP_NAME: str = "EOB-835"
 
     # JWT
-    JWT_SECRET: str = os.getenv("JWT_SECRET")
-    JWT_ALGORITHM: str = os.getenv("JWT_SECRET")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = os.getenv("JWT_SECRET")
-    REFRESH_TOKEN_EXPIRE_DAYS: int = os.getenv("JWT_SECRET")
+    JWT_SECRET: str = Field("cc50ec6192f5f20c2931a99dd3ab22625df90527af1b56fc2d5516dff3c43e6b", env="JWT_SECRET")
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
     # Password reset token expiry (minutes)
-    RESET_TOKEN_EXPIRE_MINUTES: int = os.getenv("RESET_TOKEN_EXPIRE_MINUTES")
+    RESET_TOKEN_EXPIRE_MINUTES: int = 300
 
     # Email stub "from"
-    DEFAULT_FROM_EMAIL: str = os.getenv("DEFAULT_FROM_EMAIL")
+    DEFAULT_FROM_EMAIL: str = "noreply@eob.example"
     CORS_ORIGINS: Optional[str] = "*"
 
     # AWS S3 Configuration
-    S3_BUCKET = os.getenv("S3_BUCKET")
     AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
     AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
     AWS_REGION = os.getenv("AWS_REGION")
+    S3_BUCKET = os.getenv("S3_BUCKET")
 
-    
-    #Openai key
-    OPENAI_API_KEY = ""
 
     class Config:
         env_file = ".env"

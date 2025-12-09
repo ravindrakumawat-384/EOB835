@@ -13,20 +13,10 @@ router = APIRouter(prefix="/settings/notifications", tags=["settings-notificatio
 # async def get_notifications(user: Dict[str, Any] = Depends(get_current_user)):
 async def get_notifications():
     try:
-        print("enter in get notification api")
-        print("enter in get notification api")
-        print("enter in get notification api")
-        print("enter in get notification api")
-
-        user_id = "de34a061-54d0-4e87-8f43-bbf5fe98a3c6"
-
-        print("user_id----->", user_id)
-        print("user_id----->", user_id)
-        print("user_id----->", user_id)
-        
+        user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
         logger.info(f"Fetching notification preferences for user_id: {user_id}")
         pref = await get_notification_pref(user_id)
-        print("pref----->", pref)
+        logger.debug(f"Notification preferences data: {pref}")
         if not pref:
             logger.warning(f"Preferences not found for user_id: {user_id}")
             raise HTTPException(status_code=404, detail="Preferences not found")
@@ -43,12 +33,8 @@ async def get_notifications():
 # async def upsert_notifications(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
 async def upsert_notifications(payload: Dict[str, Any]):
     try:
-        user_id = "8cb61f68-69c3-4996-b797-eec4af162756"
-        print("user_id----->", user_id)
-        print("user_id----->", user_id)
-
+        user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
         payload["user_id"] = user_id
-        print("payload--------->", payload)
 
         saved = await upsert_notification_pref(payload)
         logger.info(f"Notification preferences upserted for user_id: {user_id}")

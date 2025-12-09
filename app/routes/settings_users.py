@@ -1,188 +1,238 @@
-
 from fastapi import APIRouter, Depends, HTTPException
-from typing import Dict, Any, List
-from ..services.crud import list_team_members, create_team_member, update_team_member, delete_team_member
+from typing import Dict, Any, List, Optional
+from pydantic import BaseModel
+from bson import ObjectId
+
+import app.common.db.db as db_module
+from ..services.crud import (
+    list_team_members,
+    create_team_member,
+    update_team_member,
+    delete_team_member,
+)
 from ..services.auth_deps import get_current_user, require_role
 from ..utils.logger import get_logger
-import app.common.db.db as db_module
-from bson import ObjectId
-from pydantic import BaseModel
+
 
 logger = get_logger(__name__)
 router = APIRouter(prefix="/settings/users", tags=["settings-users"])
 
 
+# -------------------- SCHEMAS --------------------
 class InviteUser(BaseModel):
-    full_name : str
+    full_name: str
     email: str
     role: str
 
 
-# def clean_mongo_doc(doc):
-#     if not doc:
-#         return None
-#     doc = dict(doc)
-#     doc.pop('_id', None)
-    
-#     # convert ObjectId fields (if any)
-#     for key, val in doc.items():
-#         if isinstance(val, ObjectId):
-#             doc[key] = str(val)
-#     return doc
+class TableHeaderAction(BaseModel):
+    type: str
+    icon: str
+    styleClass: str
 
 
-async def serialize_usr(doc: dict) -> dict:
-    """
-    Convert MongoDB document into JSON-safe organization object.
-    """
+class TableHeader(BaseModel):
+    field: Optional[str] = None
+    label: str
+    actions: Optional[List[TableHeaderAction]] = None
+
+
+# if there is no action then field is mandatory
+
+
+# class UserItem(BaseModel):
+#     name: str
+#     email: str
+#     role: str
+#     status: str
+
+class UserItem(BaseModel):
+    id: str
+    name: str
+    email: str
+    role: str
+    status: str
+
+
+class TeamMembersTableData(BaseModel):
+    tableHeaders: List[TableHeader]
+    tableData: List[UserItem]
+
+
+class RolePermission(BaseModel):
+    role: str
+    description: str
+    userCount: int
+
+
+class UsersResponse(BaseModel):
+    teamMembersTableData: TeamMembersTableData
+    rolePermissions: List[RolePermission]
+    success: str
+
+
+# -------------------- UTILS --------------------
+async def serialize_usr(doc: dict) -> UserItem:
     if not doc:
         return None
 
-    # user = db_module.db.users.find_one({"user_id": doc["user_id"]})
-    user = await db_module.db.users.find_one({"id": doc["user_id"]},{"_id": 0})
+    user = await db_module.db.users.find_one({"id": doc["user_id"]}, {"_id": 0})
     logger.info(f"Fetched user for user_id: {user}")
-    print("user status----> ", user["is_active"])
-    if user["is_active"]== True:
-        status = "Active"
-    else:
-        status = "Inactive"
 
-    user_details = {
-        "full_name": user["full_name"],
-        "email": user["email"],
-        "role": doc.get("role"),
-        "status": status,
-    }
+    status = "Active" if user.get("is_active") else "Inactive"
 
-    return {
-        "success": True,
-        "message": "Users fetched successfully",
-        "user_details" : user_details,
-    }
+    return UserItem(
+        id=user["id"],
+        name=user["full_name"],
+        email=user["email"],
+        role=doc.get("role"),
+        status=status,
+    )
 
 
-@router.get("/", response_model=List[Dict[str, Any]])
-# async def get_users(user: Dict[str, Any] = Depends(get_current_user)):
+# -------------------- GET USERS --------------------
+@router.get("/", response_model=UsersResponse)
 async def get_users():
-    try:    
-        # org_id = user.get("organization_id")
-        # members = await list_team_members(org_id)
-
-        # user_id = "bbfa1ab8-45bc-428c-8283-0815d33779db"
-        user_id = "9017332a-c408-43ed-8b0a-6c00af1c0e6f"
+    try:
+        # TODO: Replace with actual logged-in user
+        user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775"
 
         org = await db_module.db.organization_memberships.find_one({"user_id": user_id})
-        print("org:", org)
-        print("org:", org)
-        print("org:", org)
-        print("org:", org)
-        print("org:", org)
-        try: 
-            print("Enter in getting organisation")
-            print("Enter in getting organisation")
-            print("Enter in getting organisation")
-            org_id = org["org_id"]
-            print("org_id:", org_id) 
-            org_id = org.get("org_id") 
-            print("org_id:", org_id) 
-        except:
-            print("Enter in organisation")
-            print("Enter in organisation")
-            print("Enter in organisation")
-            org_id = None
+        if not org:
+            raise HTTPException(status_code=404, detail="Organization not found")
 
-        # remove MongoDB ObjectId --> {"_id": 0}
-        all_members2 = await db_module.db.organization_memberships.find({"org_id": org_id},{"_id": 0}).to_list(length=None) 
-        print("all_members2:", all_members2)
+        org_id = org.get("org_id")
 
-        all_users = []
-        for doc in all_members2:
-            all_users.append(await serialize_usr(doc))
-        
-        print("all_users:", all_users)
+        # fetch org members
+        members = (
+            await db_module.db.organization_memberships.find(
+                {"org_id": org_id}, {"_id": 0}
+            ).to_list(length=None)
+        )
 
-        return all_users
-    
-    
+        # serialize all members
+        all_users = [await serialize_usr(doc) for doc in members]
+
+        table_headers = [
+            {"field": "name", "label": "Name"},
+            {"field": "email", "label": "Email"},
+            {"field": "role", "label": "Role"},
+            {"field": "status", "label": "Status"},
+            {
+                "label": "Actions",
+                "actions": [
+                    {
+                        "type": "edit",
+                        "icon": "pi pi-pencil",
+                        "styleClass": "p-button-text p-button-sm",
+                    },
+                    {
+                        "type": "delete",
+                        "icon": "pi pi-trash",
+                        "styleClass": "p-button-text p-button-sm p-button-danger",
+                    },
+                ],
+            },
+        ]
+
+        # EXAMPLE static permissions (replace with your actual logic)
+        role_permissions = [
+            RolePermission(
+                role="admin",
+                description="Full access to all features and settings",
+                userCount=sum(1 for u in all_users if u.role == "admin"),
+            ),
+            RolePermission(
+                role="reviewer",
+                description="Basic read/write access",
+                userCount=sum(1 for u in all_users if u.role == "reviewer"),
+            ),
+
+            RolePermission(
+                role="viewer",
+                description="Basic read",
+                userCount=sum(1 for u in all_users if u.role == "viewer"),
+            ),
+        ]
+
+        return UsersResponse(
+            teamMembersTableData=TeamMembersTableData(
+                tableHeaders=[TableHeader(**h) for h in table_headers],
+                tableData=all_users,
+            ),
+            rolePermissions=role_permissions,
+            success="User & teams details fetched successfully",
+        )
+
     except Exception as e:
         logger.error(f"Failed to fetch team members: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch team members")
 
 
-# @router.post("/", dependencies=[Depends(require_role(["Admin"]))])
+# -------------------- ADD USER --------------------
 @router.post("/")
-# async def post_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
 async def post_user(payload: Dict[str, Any]):
     try:
-        print("payload:", payload)
-        user_id = "8d8b7dff-a988-41ed-a63d-d59eb6d9ac0d"
-        # admin will add user to the organisation member table
-        # payload["organization_id"] = user.get("organization_id") or user.get("org_id")
-        add_user_id = "b7e9f26d-7537-43bc-b9fc-7aa7a6de7a51"
-        usr = await db_module.db.users.find_one({"email": payload["email"]},{"_id": 0})
-        print("usr", usr)
-        print("usr.user_id", usr["id"])
+        user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775"  # admin
+
+        # find new user
+        usr = await db_module.db.users.find_one({"email": payload["email"]}, {"_id": 0})
+        if not usr:
+            raise HTTPException(status_code=404, detail="User not found")
+
         add_user_id = usr["id"]
-        print("add_user_id", add_user_id)
-        print("add_user_id", add_user_id)
-        print("add_user_id", add_user_id)
-        print("add_user_id", add_user_id)
-        print("add_user_id", add_user_id)
-        print("add_user_id", add_user_id)
+
         org = await db_module.db.organization_memberships.find_one({"user_id": user_id})
-        org_id = org.get("org_id")  
+        org_id = org.get("org_id")
 
         payload_update = {
             "org_id": org_id,
             "user_id": add_user_id,
-            "role": payload["role"],}
-        
-        print("payload after org_id & user_id added:", payload_update)
-        
+            "role": payload["role"],
+        }
+
         member = await create_team_member(payload_update)
-        logger.info(f"Created team member for org_id: {payload_update['org_id']}")
-        return member
+        logger.info(f"Created team member: {member}")
+
+        return {"message": "User added successfully", "member": member}
+
     except Exception as e:
         logger.error(f"Failed to create team member: {e}")
         raise HTTPException(status_code=500, detail="Failed to create team member")
 
 
-# @router.put("/{member_id}", dependencies=[Depends(require_role(["Admin"]))])
-# async def put_user(member_id: str, payload: Dict[str, Any]):
+# -------------------- UPDATE USER --------------------
 @router.patch("/")
 async def patch_user(payload: Dict[str, Any]):
     try:
-        # print("member_id:", member_id)
-        print("payload:", payload)
         updated = await update_team_member(payload)
+
         if not updated:
-            logger.warning(f"Member not found: {payload.get('userId')}")
             raise HTTPException(status_code=404, detail="Member not found")
-        logger.info(f"Updated team member: {payload["userId"]}")
-        return {"message": "User Updated successfully"}
+
+        return {"message": "User updated successfully"}
+
     except Exception as e:
-        logger.error(f"Failed to update User detail: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update team member")
+        logger.error(f"Failed to update user: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update user")
 
 
-# @router.delete("/{member_id}", dependencies=[Depends(require_role(["Admin"]))])
+# -------------------- DELETE USER --------------------
 @router.delete("/{member_id}")
 async def del_user(member_id: str):
     try:
-        admin_id = "de34a061-54d0-4e87-8f43-bbf5fe98a3c6" #Admin id
+        admin_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775"
+
         org = await db_module.db.organization_memberships.find_one({"user_id": admin_id})
-        org_id = org["org_id"]
-        print("org_id:", org_id)
-        print("org_id:", org_id)
-        print("org_id:", org_id)
-        print("org_id:", org_id)
+        org_id = org.get("org_id")
 
         deleted = await delete_team_member(member_id, org_id)
+
         if not deleted:
-            logger.warning(f"Member not found: {member_id}")
             raise HTTPException(status_code=404, detail="Member not found")
-        logger.info(f"Deleted team member: {member_id}")
-        return {"Message": "User deleted successfully"}
+
+        return {"message": "User deleted successfully"}
+
     except Exception as e:
         logger.error(f"Failed to delete team member: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete team member")

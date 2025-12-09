@@ -47,12 +47,9 @@ async def get_user_profile():
     - Date Format
     """
     try:
-        # user_id = "efd59952-d01f-4872-94cb-4232349655b8"
         user_id = "12bec674-ae9f-4878-ae56-8ad25b0d76e3"
-        # logger.info(f"Fetching user profile for user_id: {user['id']}")
         logger.info(f"Fetching user profile for user_id: {user_id}")
-        # user_id = user.get("id")
-        
+
         # Get user details
         user_data = await db_module.db.users.find_one({"id": user_id})
         if not user_data:
@@ -60,7 +57,6 @@ async def get_user_profile():
             raise HTTPException(status_code=404, detail="User not found")
         
         full_name = user_data.get("full_name")
-        print("Full Name:", full_name)
 
         parts = full_name.strip().split()
         first_name = parts[0] if parts else ""
@@ -122,8 +118,6 @@ async def update_user_profile(payload: Dict[str, Any]):
     - Profile Photo
     """
     try:
-        # logger.info(f"Updating user profile for user_id: {user['id']}")
-        # user_id = user.get("id")
         user_id = "efd59952-d01f-4872-94cb-4232349655b8"
         
         # Get user details
@@ -200,7 +194,7 @@ async def update_user_profile(payload: Dict[str, Any]):
             "timezone": updated_user.get("timezone", "UTC"),
             "dateFormat": updated_user.get("date_format", "MM/DD/YYYY"),
         }
-        
+        logger.info(f"User profile updated successfully for user_id: {user_id}")
         return profile_data
         
     except HTTPException:
