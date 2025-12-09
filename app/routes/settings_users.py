@@ -69,7 +69,7 @@ async def get_users():
         # members = await list_team_members(org_id)
 
         # user_id = "bbfa1ab8-45bc-428c-8283-0815d33779db"
-        user_id = "8d8b7dff-a988-41ed-a63d-d59eb6d9ac0d"
+        user_id = "9017332a-c408-43ed-8b0a-6c00af1c0e6f"
 
         org = await db_module.db.organization_memberships.find_one({"user_id": user_id})
         print("org:", org)
