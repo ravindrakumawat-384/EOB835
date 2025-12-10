@@ -18,17 +18,11 @@ try:
     # Get OpenAI API key from environment variable (.env file)
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     
-    print(f"🔍 Loading OpenAI API key from .env file...")
-    print(f"🔑 API Key found: {'✅ YES' if OPENAI_API_KEY else '❌ NO'}")
     if OPENAI_API_KEY:
-        print(f"📝 Key length: {len(OPENAI_API_KEY)} characters")
-        print(f"📝 Key preview: {OPENAI_API_KEY[:8]}...{OPENAI_API_KEY[-4:]}")
-    
+        logger.info("🔍 Loading OpenAI API key from .env file...")
     OPENAI_AVAILABLE = True and OPENAI_API_KEY is not None and len(OPENAI_API_KEY or '') > 20
-    print(f"🤖 OpenAI Available: {'✅ YES' if OPENAI_AVAILABLE else '❌ NO'}")
     
 except ImportError as e:
-    print(f"❌ Import error: {e}")
     OPENAI_AVAILABLE = False
     OPENAI_API_KEY = None
 
@@ -39,9 +33,6 @@ def ai_extract_claims(raw_text: str) -> Dict[str, Any]:
     """
     if not raw_text or raw_text.strip() == "":
         return {"claims": [], "confidence": 0, "error": "No text to process"}
-    
-    print(f"🤖 OPENAI_AVAILABLE: {OPENAI_AVAILABLE}")
-    print(f"🔑 API Key Status: {'✅ READY' if OPENAI_API_KEY else '❌ MISSING'}")
     
     # Use ONLY AI extraction - provide fallback for testing
     if OPENAI_AVAILABLE and OPENAI_API_KEY:
@@ -63,7 +54,6 @@ def create_fallback_result(raw_text: str) -> Dict[str, Any]:
     """
     Create a structured result when AI fails - extracts basic info from the raw text.
     """
-    print("🔄 Using fallback extraction (AI not available)")
     
     # Extract basic information from the text using simple parsing
     lines = raw_text.split('\n')
@@ -143,7 +133,6 @@ def create_fallback_result(raw_text: str) -> Dict[str, Any]:
     if current_claim:
         claims.append(current_claim)
     
-    print(f"🔄 Fallback extracted {len(claims)} claims")
     
     return {
         "confidence": 60,
@@ -224,7 +213,6 @@ def extract_with_openai(raw_text: str) -> Dict[str, Any]:
         Return ONLY valid JSON with confidence scores (0-100) for each section:
         """
         
-        print(f"Sending request to OpenAI GPT-4o-mini...")
         
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -234,7 +222,6 @@ def extract_with_openai(raw_text: str) -> Dict[str, Any]:
         )
         
         content = response.choices[0].message.content.strip()
-        print(f"OpenAI Response: {content[:500]}...")
         
         # Clean up response if it has markdown formatting
         if content.startswith("```json"):
@@ -249,7 +236,6 @@ def extract_with_openai(raw_text: str) -> Dict[str, Any]:
         if "confidence" not in result:
             result["confidence"] = 70  # Default confidence
         
-        print(f"Parsed JSON successfully with {len(result.get('claims', []))} claims")
         return result
         
     except json.JSONDecodeError as e:
