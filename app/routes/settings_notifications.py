@@ -63,15 +63,15 @@ async def get_notifications():
         # print("org:", org)
 
 
-        # pref = await DB.db.notification_preferences.find({"user_id": user_id},{"_id": 0}).to_list(length=None) 
-        pref = await db_module.db.notification_preferences.find({"user_id": user_id},{"_id": 0}).to_list(length=None) 
+        pref1 = await DB.db.notification_preferences.find({"user_id": user_id},{"_id": 0}).to_list(length=None) 
+        pref2 = await db_module.db.notification_preferences.find({"user_id": user_id},{"_id": 0}).to_list(length=None) 
         # print("all_members2:", all_members2)
 
-        print("pref", pref)
-        print("pref", pref)
-        print("pref", pref)
-        print("pref", pref)
-        print("pref", pref)
+        print()
+        print("pref1---------->  ", pref1)
+        print()
+        print("pref2---------->  ", pref2)
+        print()
 
         all_pref = []
         for doc in pref:
