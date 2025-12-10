@@ -79,7 +79,7 @@ async def serialize_usr(doc: dict) -> UserItem:
     user = await db_module.db.users.find_one({"id": doc["user_id"]}, {"_id": 0})
     logger.info(f"Fetched user for user_id: {user}")
 
-    status = "Active" if user.get("is_active") else "Inactive"
+    status = "active" if user.get("is_active") else "inactive"
 
     return UserItem(
         id=user["id"],
@@ -205,12 +205,13 @@ async def post_user(payload: Dict[str, Any]):
 @router.patch("/")
 async def patch_user(payload: Dict[str, Any]):
     try:
+        print("payload in patch_user:", payload)
         updated = await update_team_member(payload)
 
         if not updated:
             raise HTTPException(status_code=404, detail="Member not found")
 
-        return {"message": "User updated successfully"}
+        return {"Success": "User updated successfully"}
 
     except Exception as e:
         logger.error(f"Failed to update user: {e}")

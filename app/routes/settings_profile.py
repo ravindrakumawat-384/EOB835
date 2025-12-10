@@ -47,7 +47,7 @@ async def get_user_profile():
     - Date Format
     """
     try:
-        user_id = "12bec674-ae9f-4878-ae56-8ad25b0d76e3"
+        user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
         logger.info(f"Fetching user profile for user_id: {user_id}")
 
         # Get user details

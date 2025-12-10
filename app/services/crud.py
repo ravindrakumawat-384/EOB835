@@ -158,8 +158,9 @@ async def create_team_member(payload: Dict[str, Any]) -> Dict[str, Any]:
 async def update_team_member(payload: Dict[str, Any]) -> int:
     # Build update data with only the fields we want to update
     update_data = {}
-    if "fullName" in payload:
-        update_data["full_name"] = payload["fullName"]
+    print("payload in crud:", payload)
+    if "name" in payload:
+        update_data["full_name"] = payload["name"]
     if "email" in payload:
         update_data["email"] = payload["email"]
     # Convert status string to boolean
@@ -168,9 +169,9 @@ async def update_team_member(payload: Dict[str, Any]) -> int:
         if isinstance(status_value, str):
             update_data["is_active"] = status_value.lower() in ["active", "true", "1"]
         else:
-            update_data["is_active"] = bool(status_value)
-    
+            update_data["is_active"] = bool(status_value)    
 
+    print("update_data in crud:", update_data)
     res = await DB.users.update_one({"id": payload["userId"]}, {"$set": update_data})
     
     # logger.info(f"Updated team member {payload['userId']} with data: {update_data}")
