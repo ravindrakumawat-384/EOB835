@@ -20,23 +20,9 @@ def store_extraction_result(file_id: str, ai_result: Dict[str, Any], raw_text: s
     flat_claims = flatten_claims(ai_result) if ai_result else []
     
     # Print AI extraction result for debugging
-    print('='*80)
-    print('🤖 AI EXTRACTION RESULT:')
-    print(json.dumps(ai_result, indent=2, default=str))
-    print('='*80)
-    print(f'📋 FLATTENED CLAIMS ({len(flat_claims)} separate claims):')
     for i, claim in enumerate(flat_claims, 1):
-        print(f"\n--- CLAIM {i} ---")
-        print(f"Claim Number: {claim.get('claim_number', 'N/A')}")
-        print(f"Patient: {claim.get('patient_name', 'N/A')}")
-        print(f"Payer: {claim.get('payer_name', 'N/A')}")
-        print(f"Amount Paid: ${claim.get('total_paid_amount', 0)}")
-        print(f"Member ID: {claim.get('member_id', 'N/A')}")
-        print(f"Service Date: {claim.get('service_date_from', 'N/A')}")
-    print('='*80)
-    print('📄 RAW TEXT (first 500 chars):', raw_text[:500])
-    print('='*80)
-    
+        logger.info(f"Extracted Claim {i}: {json.dumps(claim, indent=2)}")
+
     doc = {
         "_id": str(uuid.uuid4()),
         "fileId": file_id,
@@ -56,13 +42,8 @@ def store_extraction_result(file_id: str, ai_result: Dict[str, Any], raw_text: s
     logger.info(f"Stored extraction result for file {file_id} in MongoDB with _id {doc['_id']}")
     
     # Print what was stored
-    print('💾 STORED IN MONGODB:')
     stored_summary = {k: v for k, v in doc.items() if k not in ['rawExtracted', 'originalAiResult']}
-    print(json.dumps(stored_summary, indent=2, default=str))
-    print('='*80)
-    print(f"✅ SUMMARY: Stored {len(flat_claims)} SEPARATE claims in MongoDB collection 'extraction_results'")
-    print('='*80)
-    
+    logger.info(f"Extraction Result Summary: {json.dumps(stored_summary, indent=2, default=str)}")    
     return doc["_id"]
 
 # Dummy AI extraction function (replace with real model)

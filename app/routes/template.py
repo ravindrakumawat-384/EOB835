@@ -110,11 +110,20 @@ async def upload_template_file(file: UploadFile = File(...)) -> Dict[str, Any]:
         dynamic_keys = extraction_result.get("dynamic_keys", [])
         json_result = extraction_result.get("extraction_data", {})
         
-        # 7. Create template in PostgreSQL and save data
+        # 7. Extract payer_id dynamically from JSON and create template in PostgreSQL
+        from app.services.template_db_service import extract_and_save_payer_data
+        org_id = "9ac493f7-cc6a-4d7d-8646-affb00ed58da"
+        payer_id = extract_and_save_payer_data(json_result, org_id, file.filename)
+        if not payer_id:
+            # Fallback: create/get 'Unknown Payer' for org
+            from app.services.payer_template_service import get_or_create_payer
+            payer_id = get_or_create_payer('Unknown Payer', org_id)
         template_name = f"Template-{file.filename}-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         template_id = create_template_in_postgres(
             name=template_name,
             filename=file.filename,
+            org_id=org_id,
+            payer_id=payer_id,
             template_type="other"
         )
         

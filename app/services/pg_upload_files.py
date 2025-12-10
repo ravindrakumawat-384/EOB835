@@ -2,13 +2,15 @@ from datetime import datetime
 from typing import Optional
 import uuid
 import psycopg2
+from ..utils.logger import get_logger
+logger = get_logger(__name__)
 
 # Example connection (replace with your config)
 def get_pg_conn():
     return psycopg2.connect(
         dbname="eob_db",
         user="aman0622",
-        password="password123",
+        password="password1234",
         host="127.0.0.1",
         port="5432"
     )
@@ -34,7 +36,7 @@ def insert_upload_file(
     
     if existing_file:
         file_id = existing_file[0]
-        print(f"📋 File with hash {file_hash} already exists with ID: {file_id}")
+        logger.info(f"📋 File with hash {file_hash} already exists with ID: {file_id}, updating record.")
         # Update existing record
         cur.execute(
             """
@@ -50,7 +52,7 @@ def insert_upload_file(
     else:
         # Generate new UUID for file ID
         file_id = str(uuid.uuid4())
-        print(f"📋 Creating new file record with ID: {file_id}, hash: {file_hash}")
+        logger
         cur.execute(
             """
             INSERT INTO upload_files (
@@ -80,7 +82,6 @@ def update_file_status(file_id: str, status: str, error_message: Optional[str] =
     conn = None
     cur = None
     try:
-        print(f"🔄 Attempting to update file status: file_id={file_id}, status={status}")
         conn = get_pg_conn()
         cur = conn.cursor()
         
@@ -89,14 +90,12 @@ def update_file_status(file_id: str, status: str, error_message: Optional[str] =
         existing_record = cur.fetchone()
         
         if not existing_record:
-            print(f"❌ File with ID {file_id} not found in database")
             return False
         
-        print(f"📋 Found existing record: id={existing_record[0]}, current_status={existing_record[1]}")
-        
+        logger.info(f"📝 Updating file ID {file_id} to status '{status}'")
         # Update the record
         if error_message:
-            print(f"📝 Updating with error message: {error_message[:100]}...")
+            logger.info(f"📝 Setting error message: {error_message}")
             cur.execute(
                 """
                 UPDATE upload_files 
@@ -106,7 +105,7 @@ def update_file_status(file_id: str, status: str, error_message: Optional[str] =
                 (status, error_message, datetime.utcnow(), file_id)
             )
         else:
-            print(f"📝 Updating status only (no error message)")
+            logger.info(f"📝 Clearing error message")
             cur.execute(
                 """
                 UPDATE upload_files 
@@ -120,19 +119,17 @@ def update_file_status(file_id: str, status: str, error_message: Optional[str] =
         rows_affected = cur.rowcount
         
         if rows_affected > 0:
-            print(f"✅ Successfully updated {rows_affected} row(s)")
+            logger.info(f"✅ File ID {file_id} updated successfully to status '{status}'")
         else:
-            print(f"⚠️ No rows were affected by the update")
+            logger.warning(f"⚠️ No rows were affected when updating file ID {file_id} to status '{status}'")
         
         return rows_affected > 0
         
     except psycopg2.Error as e:
-        print(f"❌ PostgreSQL error updating file status: {e}")
         if conn:
             conn.rollback()
         return False
     except Exception as e:
-        print(f"❌ General error updating file status: {e}")
         import traceback
         traceback.print_exc()
         if conn:
@@ -160,9 +157,6 @@ def mark_processing_failed(file_id: str, error_details: str, failure_stage: str 
     full_error_message = f"[{failure_stage.upper()}] {error_details}"
     
     # Use the enhanced update_file_status function
-    print(f"🚨 Marking file as processing failed: {file_id}")
-    print(f"📝 Error: {full_error_message}")
-    
     return update_file_status(file_id, "failed", full_error_message)
 
 
@@ -220,7 +214,6 @@ def set_detected_template_version(file_id: str, template_version_id: str = None,
     except Exception as e:
         if conn:
             conn.rollback()
-        print(f"❌ Error updating detected_template_version: {e}")
         return False
     finally:
         if cur:
@@ -238,7 +231,6 @@ def check_database_schema() -> dict:
     conn = None
     cur = None
     try:
-        print("🔍 Checking database schema...")
         conn = get_pg_conn()
         cur = conn.cursor()
         
@@ -297,32 +289,24 @@ def test_database_update(test_file_id: str = "test_debug_file") -> bool:
     Returns:
         bool: True if test was successful
     """
-    print(f"🧪 Testing database update with file ID: {test_file_id}")
     
     # First, check if we can connect to database
     try:
         conn = get_pg_conn()
-        print("✅ Database connection successful")
         conn.close()
     except Exception as e:
-        print(f"❌ Database connection failed: {e}")
+        logger.error(f"❌ Database connection failed: {e}")
         return False
     
     # Check schema
     schema_info = check_database_schema()
     if "error" in schema_info:
-        print(f"❌ Schema check failed: {schema_info['error']}")
+        logger.error(f"❌ Database schema check failed: {schema_info['error']}")
         return False
-    
-    print(f"📋 Database schema check:")
-    print(f"   - Table exists: {schema_info['table_exists']}")
-    print(f"   - Missing columns: {schema_info['missing_columns']}")
-    print(f"   - Sample data count: {len(schema_info['sample_data'])}")
     
     # Try to update a test record
     success = update_file_status(test_file_id, "test_status", "Test error message")
-    print(f"📊 Update test result: {success}")
-    
+    logger.info(f"📊 Update test result: {success}")
     return success
 
 

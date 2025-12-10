@@ -9,7 +9,8 @@ from typing import Dict, Any, List
 from datetime import datetime
 import openai
 from dotenv import load_dotenv
-
+from ..utils.logger import get_logger
+logger = get_logger(__name__)
 # Load environment variables
 load_dotenv()
 
@@ -64,12 +65,11 @@ class AI835Generator:
             # Validate and clean the AI response
             validated_835 = self._validate_and_clean_835(ai_generated_835)
             
-            print(f"🤖 AI Generated 835 format successfully")
+            logger.info("🤖 AI Generated 835 format successfully")
             return validated_835
             
         except Exception as e:
-            print(f"❌ AI Generation failed: {e}")
-            print(f"🔄 Falling back to standard generation")
+            logger.error(f"❌ AI 835 generation failed: {e}")
             return self._generate_standard_835(claim_data)
     
     def _create_835_generation_prompt(self, claim_json: str) -> str:
@@ -154,8 +154,7 @@ Generate ONLY the EDI 835 format content with proper segments and delimiters. Do
         required_segments = ['ISA*', 'GS*', 'ST*835*', 'BPR*', 'SE*', 'GE*', 'IEA*']
         for segment in required_segments:
             if segment not in final_835:
-                print(f"⚠️  Missing required segment: {segment}")
-        
+                logger.warning(f"Missing required segment in AI 835: {segment}")
         return final_835
     
     def _generate_standard_835(self, claim_data: Dict[str, Any]) -> str:
@@ -244,11 +243,11 @@ Generate ONLY the EDI 835 format content with proper segments and delimiters. Do
             ai_response = response.choices[0].message.content.strip()
             enhanced_lines = self._parse_ai_service_lines(ai_response)
             
-            print(f"🤖 AI enhanced {len(enhanced_lines)} service lines")
+            logger.info(f"🤖 AI enhanced {len(enhanced_lines)} service lines")
             return enhanced_lines
             
         except Exception as e:
-            print(f"❌ AI service line enhancement failed: {e}")
+            logger.error(f"❌ AI service line enhancement failed: {e}")
             return self._generate_default_service_lines(claim_data)
     
     def _create_service_line_prompt(self, claim_data: Dict[str, Any]) -> str:

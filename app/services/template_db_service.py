@@ -6,9 +6,13 @@ import psycopg2
 from pymongo import MongoClient
 from ..services.pg_upload_files import get_pg_conn
 from ..utils.logger import get_logger
-
 logger = get_logger(__name__)
 
+from app.common.db.db import init_db
+DB = init_db()
+
+
+payer_ids = ''
 def extract_and_save_payer_data(json_data: dict, org_id: str, filename: str = None) -> Optional[str]:
     """
     Extract payer information from template JSON data and save to payer table.
@@ -178,6 +182,8 @@ def extract_and_save_payer_data(json_data: dict, org_id: str, filename: str = No
         
         conn.commit()
         logger.info(f"✅ Created new payer from template JSON: {payer_name} (ID: {payer_id})")
+        logger.info(f"Payer AI Detection Metadata: {json.dumps(ai_detection_metadata, indent=2)}")
+        payer_ids += payer_id
         return payer_id
         
     except Exception as e:
@@ -202,7 +208,7 @@ def create_template_in_postgres(
     name: str,
     filename: str,
     org_id: str = "9ac493f7-cc6a-4d7d-8646-affb00ed58da",
-    payer_id: str = "6b8e2c7e-8f32-4c9e-8d4f-1a2b3c4d5e6f",  # Default payer_id
+    payer_id: str = payer_ids,  # Default payer_id
     template_type: str = "other"
 ) -> str:
     """
@@ -210,6 +216,7 @@ def create_template_in_postgres(
     
     Returns template_id
     """
+    
     conn = get_pg_conn()
     cur = conn.cursor()
     
@@ -325,9 +332,10 @@ def save_template_data(
     mongo_doc_id = str(uuid.uuid4())
     
     # Save session data to MongoDB first
-    mongo_client = get_mongo_conn()
-    db = mongo_client['eob_db']
-    sessions_collection = db['template_builder_sessions']
+    # mongo_client = get_mongo_conn()
+    # db = mongo_client['eob_db']
+
+    sessions_collection = DB['template_builder_sessions']
     
     try:
         session_data = {
@@ -387,7 +395,8 @@ def save_template_data(
         logger.error(f"Error saving template data: {e}")
         raise
     finally:
-        mongo_client.close()
+        logger.info("Closing MongoDB connection")
+        # mongo_client.close()
 
 def process_existing_templates_for_payer_data(org_id: str = "9ac493f7-cc6a-4d7d-8646-affb00ed58da") -> Dict[str, Any]:
     """
@@ -399,9 +408,9 @@ def process_existing_templates_for_payer_data(org_id: str = "9ac493f7-cc6a-4d7d-
     Returns:
         Dictionary with processing results
     """
-    mongo_client = get_mongo_conn()
-    db = mongo_client['eob_db']
-    sessions_collection = db['template_builder_sessions']
+    # mongo_client = get_mongo_conn()
+    # db = mongo_client['eob_db']
+    sessions_collection = DB['template_builder_sessions']
     
     results = {
         "processed_templates": 0,
@@ -469,13 +478,14 @@ def process_existing_templates_for_payer_data(org_id: str = "9ac493f7-cc6a-4d7d-
         results["errors"].append(str(e))
         return results
     finally:
-        mongo_client.close()
+        logger.info("Closing MongoDB connection")
+        # mongo_client.close()
 
 def get_template_by_id(template_id: str) -> Optional[Dict[str, Any]]:
     """Retrieve complete template data by ID using existing schema."""
     conn = None
     cur = None
-    mongo_client = None
+    # mongo_client = None
     
     try:
         # Get template data from PostgreSQL
@@ -496,9 +506,9 @@ def get_template_by_id(template_id: str) -> Optional[Dict[str, Any]]:
             return None
         
         # Get session data from MongoDB
-        mongo_client = get_mongo_conn()
-        db = mongo_client['eob_db']
-        sessions_collection = db['template_builder_sessions']
+        # mongo_client = get_mongo_conn()
+        # db = mongo_client['eob_db']
+        sessions_collection = DB['template_builder_sessions']
         
         session_data = sessions_collection.find_one({"template_id": template_id})
         
@@ -540,14 +550,15 @@ def get_template_by_id(template_id: str) -> Optional[Dict[str, Any]]:
             cur.close()
         if conn:
             conn.close()
-        if mongo_client:
-            mongo_client.close()
+        # if mongo_client:
+        #     mongo_client.close()
+        logger.info("Closed DB connection")
 
 def list_all_templates(limit: int = 50) -> List[Dict[str, Any]]:
     """List all templates with basic information using existing schema."""
     conn = None
     cur = None
-    mongo_client = None
+    # mongo_client = None
     
     try:
         conn = get_pg_conn()
@@ -566,9 +577,9 @@ def list_all_templates(limit: int = 50) -> List[Dict[str, Any]]:
         templates = []
         
         # Get MongoDB connection for session data
-        mongo_client = get_mongo_conn()
-        db = mongo_client['eob_db']
-        sessions_collection = db['template_builder_sessions']
+        # mongo_client = get_mongo_conn()
+        # db = mongo_client['eob_db']
+        sessions_collection = DB['template_builder_sessions']
         
         for row in cur.fetchall():
             template_id = str(row[0])
@@ -607,17 +618,18 @@ def list_all_templates(limit: int = 50) -> List[Dict[str, Any]]:
             cur.close()
         if conn:
             conn.close()
-        if mongo_client:
-            mongo_client.close()
+        # if mongo_client:
+        #     mongo_client.close()
+        logger.info("Closed DB connection")
 
 def get_template_keys_by_id(template_id: str) -> List[str]:
     """Get the dynamic keys for a specific template using existing schema."""
-    mongo_client = None
+    # mongo_client = None
     
     try:
-        mongo_client = get_mongo_conn()
-        db = mongo_client['eob_db']
-        sessions_collection = db['template_builder_sessions']
+        # mongo_client = get_mongo_conn()
+        # db = mongo_client['eob_db']
+        sessions_collection = DB['template_builder_sessions']
         
         session_data = sessions_collection.find_one({"template_id": template_id})
         return session_data.get("dynamic_keys", []) if session_data else []
@@ -626,8 +638,9 @@ def get_template_keys_by_id(template_id: str) -> List[str]:
         logger.error(f"Error getting template keys: {e}")
         return []
     finally:
-        if mongo_client:
-            mongo_client.close()
+        # if mongo_client:
+        #     mongo_client.close()
+        logger.info("Closed DB connection")
 
 def update_template_session_data(
     template_id: str,
@@ -635,12 +648,12 @@ def update_template_session_data(
     confidence: int = None
 ) -> bool:
     """Update existing template session data in MongoDB."""
-    mongo_client = None
+    # mongo_client = None
     
     try:
-        mongo_client = get_mongo_conn()
-        db = mongo_client['eob_db']
-        sessions_collection = db['template_builder_sessions']
+        # mongo_client = get_mongo_conn()
+        # db = mongo_client['eob_db']
+        sessions_collection = DB['template_builder_sessions']
         
         update_doc = {
             "extracted_data": updated_data,
@@ -666,5 +679,6 @@ def update_template_session_data(
         logger.error(f"Error updating template session data: {e}")
         return False
     finally:
-        if mongo_client:
-            mongo_client.close()
+        # if mongo_client:
+        #     mongo_client.close()
+        logger.info("Closed DB connection")

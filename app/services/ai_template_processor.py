@@ -15,10 +15,7 @@ try:
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     OPENAI_AVAILABLE = True and OPENAI_API_KEY is not None and len(OPENAI_API_KEY or '') > 20
     
-    print(f"🤖 OpenAI Available for Template Processing: {'✅ YES' if OPENAI_AVAILABLE else '❌ NO'}")
-    
 except ImportError as e:
-    print(f"❌ Import error for template processing: {e}")
     OPENAI_AVAILABLE = False
     OPENAI_API_KEY = None
 
