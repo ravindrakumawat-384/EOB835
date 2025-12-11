@@ -111,6 +111,43 @@ async def upload_template_file(file: UploadFile = File(...)) -> Dict[str, Any]:
         json_result = extraction_result.get("extraction_data", {})
         
         # 7. Extract payer_id dynamically from JSON and create template in PostgreSQL
+        # 7. Extract payer_name from JSON and use as template name
+        payer_name = None
+        payer_fields = [
+            "payer_name", "payer", "insurance_company", "insurer", "carrier",
+            "insurance_carrier", "plan_name", "health_plan", "insurance_plan",
+            "company_name", "organization_name", "insurance_name"
+        ]
+        # 1. Check top-level fields
+        for field in payer_fields:
+            val = json_result.get(field)
+            if val:
+                payer_name = str(val).strip()
+                break
+        # 2. Check payer_info object
+        if not payer_name and "payer_info" in json_result:
+            payer_info = json_result["payer_info"]
+            if isinstance(payer_info, dict):
+                for field in payer_fields:
+                    val = payer_info.get(field)
+                    if val:
+                        payer_name = str(val).strip()
+                        break
+        # 3. Check claims
+        if not payer_name:
+            claims = json_result.get("claims", [])
+            if claims and isinstance(claims, list):
+                for claim in claims:
+                    for field in payer_fields:
+                        val = claim.get(field)
+                        if val:
+                            payer_name = str(val).strip()
+                            break
+                    if payer_name:
+                        break
+        if not payer_name:
+            payer_name = "UnknownPayer"
+        # Extract payer_id dynamically from JSON and create template in PostgreSQL
         from app.services.template_db_service import extract_and_save_payer_data
         org_id = "9ac493f7-cc6a-4d7d-8646-affb00ed58da"
         payer_id = extract_and_save_payer_data(json_result, org_id, file.filename)
@@ -120,7 +157,7 @@ async def upload_template_file(file: UploadFile = File(...)) -> Dict[str, Any]:
             payer_id = get_or_create_payer('Unknown Payer', org_id)
         template_name = f"Template-{file.filename}-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         template_id = create_template_in_postgres(
-            name=template_name,
+            name=payer_name,
             filename=file.filename,
             org_id=org_id,
             payer_id=payer_id,

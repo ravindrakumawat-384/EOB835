@@ -16,6 +16,19 @@ logger = get_logger(__name__)
 # Router
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
+def covert_date_time(value):
+    if not value:
+        return None
+    from datetime import datetime
+    try:
+        if hasattr(value, "strftime"):
+            return value.strftime("%d-%m-%Y")
+        dt = datetime.fromisoformat(value.replace("Z", ""))
+        return dt.strftime("%d-%m-%Y")
+    except:
+        return None
+    
+
 @router.get("/summary", response_model=DashboardResponse)
 async def dashboard_summary() -> JSONResponse:
     """
@@ -159,7 +172,8 @@ async def dashboard_summary() -> JSONResponse:
                 "fileName": row[0],
                 "payer": row[3] or "Unknown",
                 "status": row[2],
-                "uploaded": humanize(row[1])
+                # "uploaded": humanize(row[1])
+                "uploaded": covert_date_time(row[1])
             })
         # MongoDB recent uploads removed - using PostgreSQL data only
         resp_data = {
@@ -170,7 +184,7 @@ async def dashboard_summary() -> JSONResponse:
                 "pendingReview": pending_review + pg_pending_review,
                 "accuracyPercent": max(mongo_accuracy_percent, pg_accuracy_percent),
                 "exceptions": exceptions + pg_exceptions,
-                # "needsTemplate": needs_template + pg_needs_template,
+                "needsTemplate": needs_template + pg_needs_template,
                 "needsTemplate": total_templates
             },
             "recentUploadsData": {

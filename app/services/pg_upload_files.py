@@ -56,10 +56,10 @@ def insert_upload_file(
         cur.execute(
             """
             INSERT INTO upload_files (
-                id, org_id, batch_id, original_filename, storage_path, mime_type, file_size, hash, upload_source, uploaded_by, uploaded_at, processing_status
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                id, org_id, batch_id, original_filename, storage_path, mime_type, file_size, hash, upload_source, uploaded_by, uploaded_at, processing_status, reviwer_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (file_id, org_id, batch_id, filename, s3_path, mime_type, file_size, file_hash, upload_source, uploaded_by, datetime.utcnow(), status)
+            (file_id, org_id, batch_id, filename, s3_path, mime_type, file_size, file_hash, upload_source, uploaded_by, datetime.utcnow(), status, uploaded_by)
         )
     
     conn.commit()

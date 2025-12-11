@@ -18,9 +18,12 @@ from app.services.file_text_extractor import extract_text_from_file
 from app.services.ai_claim_extractor import ai_extract_claims, flatten_claims
 from app.services.payer_template_service import get_or_create_payer, check_template_match, store_claims_in_postgres
 import mimetypes
+from app.common.db.db import init_db
+
+DB = init_db() 
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/upload", tags=["upload"])
-logger = get_logger(__name__)
 
 # S3 configuration (replace with your actual credentials and bucket)
 S3_BUCKET = settings.S3_BUCKET
@@ -80,6 +83,7 @@ async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
         file_size = len(content)
         upload_source = "manual"
         uploaded_by = "b729c531-7c90-4602-b541-e910d45b0a0d"  
+        uploaded_by = "9f44298b-5e30-4a7c-a8cb-1ae003cd9134"
         file_id = insert_upload_file(
             org_id=org_id,
             batch_id=batch_id,
@@ -111,73 +115,113 @@ async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
             })
             continue
         
-        # 8. AI extraction: extract claims from text (AI ONLY)
-        try:
-            ai_result = ai_extract_claims(raw_text)
-            flat_claims = flatten_claims(ai_result)
-        except Exception as e:
-            logger.error(f"AI extraction failed for {file.filename}: {str(e)}")
-            mark_processing_failed(file_id, f"AI extraction failed: {str(e)}", "ai_processing")
-            responses.append({
-                "filename": file.filename,
-                "status": "error",
-                "message": f"AI extraction failed: {str(e)}",
-                "file_id": file_id
-            })
-            continue
-        
-        # 9. Comprehensive validation of file processing
-        is_valid, validation_error = comprehensive_file_validation(raw_text, ai_result, file.filename)
-        if not is_valid:
-            logger.error(f"File validation failed for {file.filename}: {validation_error}")
-            logger.info(f"🔄 Attempting to mark file {file_id} as processing failed (validation)")
-            update_success = mark_processing_failed(file_id, validation_error, "validation")
-            logger.info(f"📊 Database update result: {update_success}")
-            responses.append({
-                "filename": file.filename,
-                "status": "error",
-                "message": f"File validation failed: {validation_error}",
-                "file_id": file_id
-            })
-            continue
-        
+        # 8. AI extraction: use AI model to convert text to JSON
+        ai_result = ai_extract_claims(raw_text)
+        flat_claims = flatten_claims(ai_result)
+
+        # If uploaded file is JSON, extract payer name and update detected_payer_id
+        payer_name = None
+        if ai_result and isinstance(ai_result, dict):
+            # Try to get payer name from top-level or claims
+            payer_info = ai_result.get('payer_info', {})
+            payer_name = payer_info.get('name')
+            if not payer_name and 'claims' in ai_result and isinstance(ai_result['claims'], list) and ai_result['claims']:
+                payer_name = ai_result['claims'][0].get('payer_name')
+
+        if payer_name:
+            # Check if payer exists in payer table
+            from app.services.payer_template_service import get_or_create_payer
+            payer_id = get_or_create_payer(payer_name, org_id)
+            if payer_id:
+                # Update detected_payer_id in upload_files table
+                from app.services.pg_upload_files import update_file_status
+                import psycopg2
+                from app.services.pg_upload_files import get_pg_conn
+                pg = get_pg_conn()
+                cur = pg.cursor()
+                cur.execute("UPDATE upload_files SET detected_payer_id = %s WHERE id = %s", (payer_id, file_id))
+                pg.commit()
+                cur.close()
+                pg.close()
+
+        # 10. Store each claim JSON as a separate document in MongoDB extraction_result collection
+        # Store all claims in extraction_results collection as separate documents
+        mongo_doc_ids = store_extraction_result(file_id, ai_result, raw_text) if flat_claims else []
+
+        # 11. Process payers and templates
+        payer_template_status = {}
+        detected_template_version_id = None
+        if flat_claims:
+            print("Processing payer and template matching...")
+            first_claim = flat_claims[0]
+            payer_name = first_claim.get('payer_name')
+            if payer_name:
+                print(f"payer name ===============: {payer_name}")
+                payer_id = get_or_create_payer(payer_name, org_id)
+                print(f"payer_id ===============: {payer_id}")
+                # Find all template_ids for this payer
+                from app.services.pg_upload_files import get_pg_conn
+                pg = get_pg_conn()
+                cur = pg.cursor()
+                cur.execute("SELECT id FROM templates WHERE payer_id = %s", (payer_id,))
+                template_ids = [str(row[0]) for row in cur.fetchall()]
+                print("template_ids ===============:", template_ids)
+                cur.close()
+                pg.close()
+                # Find best matching template_builder_session for these template_ids
+                # from app.services.template_db_service import get_mongo_conn
+                # mongo_client = get_mongo_conn()
+                # db = DB['eob_db']
+                sessions_collection = DB['template_builder_sessions']
+                cursor = sessions_collection.find({"template_id": {"$in": template_ids}})
+                template_sessions = await cursor.to_list(length=None)
+                claim_keys = list(first_claim.keys())
+                from app.services.payer_template_service import keys_match_template
+                best_match = None
+                best_frac = 0.0
+                for session in template_sessions:
+                    dynamic_keys = session.get("dynamic_keys", [])
+                    print(f"Checking session {session.get('_id')} with dynamic keys: {dynamic_keys}")
+                    if not dynamic_keys:
+                        continue
+                    extracted_set = set([k.lower() for k in claim_keys if k])
+                    template_set = set([k.lower() for k in dynamic_keys if k])
+                    print(f"Extracted keys set: {extracted_set}")
+                    print(f"Template keys set: {template_set}")
+                    matched = extracted_set.intersection(template_set)
+                    frac = len(matched) / max(1, len(template_set))
+                    if frac > best_frac:
+                        best_frac = frac
+                        best_match = session
+                # mongo_client.close()
+                if best_match and best_frac > 0:
+                    detected_template_version_id = best_match.get("_id")
+                    print(f"Attempting to update upload_files: file_id={file_id}, detected_template_version_id={detected_template_version_id}, match_percentage={best_frac*100:.2f}%")
+                    logger.info(f"Attempting to update upload_files: file_id={file_id}, detected_template_version_id={detected_template_version_id}, match_percentage={best_frac*100:.2f}%")
+                    from app.services.pg_upload_files import get_pg_conn
+                    pg = get_pg_conn()
+                    cur = pg.cursor()
+                    cur.execute("UPDATE upload_files SET detected_template_version_id = %s WHERE id = %s", (detected_template_version_id, file_id))
+                    pg.commit()
+                    print(f"Update result: {cur.rowcount} row(s) affected.")
+                    logger.info(f"Update result: {cur.rowcount} row(s) affected.")
+                    cur.close()
+                    pg.close()
+                template_status = check_template_match(payer_id, list(first_claim.keys()))
+                payer_template_status = {
+                    "payer_id": payer_id,
+                    "template_status": template_status,
+                    "detected_template_version_id": detected_template_version_id
+                }
+
+        # 12. Store claims in PostgreSQL
+        claim_ids = store_claims_in_postgres(file_id, flat_claims, org_id)
+
+        # 13. Update file status to processed if everything succeeded
+        update_file_status(file_id, "pending_review")
+
         # Log AI extraction results
         logger.info(f"AI extraction confidence: {ai_result.get('confidence', 0)}%")
-        
-        try:
-            # 10. Store extraction result in MongoDB (original AI result + flat claims)
-            mongo_doc_id = store_extraction_result(file_id, ai_result, raw_text)
-            
-            # 11. Process payers and templates
-            payer_template_status = {}
-            if flat_claims:
-                first_claim = flat_claims[0]
-                payer_name = first_claim.get('payer_name')
-                if payer_name:
-                    payer_id = get_or_create_payer(payer_name, org_id)
-                    template_status = check_template_match(payer_id, list(first_claim.keys()))
-                    payer_template_status = {
-                        "payer_id": payer_id,
-                        "template_status": template_status
-                    }
-            
-            # 12. Store claims in PostgreSQL
-            claim_ids = store_claims_in_postgres(file_id, flat_claims, org_id)
-            
-            # 13. Update file status to processed if everything succeeded
-            update_file_status(file_id, "processed")
-            
-        except Exception as e:
-            logger.error(f"Error during database operations for {file.filename}: {str(e)}")
-            # Update file status to failed if database operations fail
-            mark_processing_failed(file_id, f"Database operation failed: {str(e)}", "database_storage")
-            responses.append({
-                "filename": file.filename,
-                "status": "error",
-                "message": f"Database operation failed: {str(e)}",
-                "file_id": file_id
-            })
-            continue
         
         responses.append({
             "filename": file.filename,
@@ -185,7 +229,7 @@ async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
             "message": "File uploaded, validated, and processed.",
             "s3_path": s3_path,
             "file_id": file_id,
-            "mongo_doc_id": mongo_doc_id,
+            "mongo_doc_ids": mongo_doc_ids,
             "claims_count": len(flat_claims),
             "claim_ids": claim_ids,
             "payer_template_status": payer_template_status
