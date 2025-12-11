@@ -69,7 +69,7 @@ async def review_queue(
         if not org_id:
             raise HTTPException(status_code=400, detail={"message": "missing_org_id"})
         if status == "pending":
-            status = "Pending Review"
+            status = "Pending_Review"
         else:
             status = status
         

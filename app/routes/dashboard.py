@@ -69,17 +69,73 @@ async def dashboard_summary() -> JSONResponse:
         # File stats
         cur.execute("SELECT COUNT(*) FROM upload_files WHERE org_id = %s", (org_id,))
         pg_uploaded = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM upload_files WHERE org_id = %s AND processing_status = 'completed'", (org_id,))
-        pg_processed = cur.fetchone()[0]
+        # cur.execute("SELECT COUNT(*) FROM upload_files WHERE org_id = %s AND processing_status = 'completed'", (org_id,))
+        # pg_processed = cur.fetchone()[0]
+        cur.execute("""
+            SELECT COUNT(*) 
+            FROM upload_files 
+            WHERE org_id = %s 
+            AND processing_status IN ('pending_review', 'failed', 'completed', 'exception')
+        """, (org_id,))
+        count_processed = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM upload_files WHERE org_id = %s AND processing_status = 'pending_review'", (org_id,))
         pg_pending_review = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM upload_files WHERE org_id = %s AND processing_status = 'failed'", (org_id,))
+        # cur.execute("SELECT COUNT(*) FROM upload_files WHERE org_id = %s AND processing_status = 'failed'", (org_id,))
+        # pg_exceptions = cur.fetchone()[0]
+        cur.execute("""
+            SELECT COUNT(*)
+            FROM upload_files
+            WHERE org_id = %s
+            AND processing_status IN ('failed', 'template_need', 'Unreadable')
+        """, (org_id,))
         pg_exceptions = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM upload_files WHERE org_id = %s AND processing_status = 'needs_template'", (org_id,))
         pg_needs_template = cur.fetchone()[0]
-        cur.execute("SELECT AVG(ai_payer_confidence) FROM upload_files WHERE org_id = %s AND ai_payer_confidence IS NOT NULL", (org_id,))
-        pg_acc = cur.fetchone()[0]
-        pg_accuracy_percent = round(pg_acc, 1) if pg_acc else 0.0
+        # cur.execute("SELECT AVG(ai_payer_confidence) FROM upload_files WHERE org_id = %s AND ai_payer_confidence IS NOT NULL", (org_id,))
+        # pg_acc = cur.fetchone()[0]
+        # pg_accuracy_percent = round(pg_acc, 1) if pg_acc else 0.0
+
+        mongo_accuracy_percent = 0.0
+        try:
+            extraction_col = db_module.db["extraction_results"]
+
+            # Step 1 — fetch file_ids for this org from Postgres
+            cur.execute("SELECT id FROM upload_files WHERE org_id = %s", (org_id,))
+            file_rows = cur.fetchall()
+            file_ids = [str(r[0]) for r in file_rows] if file_rows else []
+
+            if file_ids:
+                # Step 2 — fetch matching extraction_results and average aiConfidence
+                def split_chunks(lst, n=500):
+                    for i in range(0, len(lst), n):
+                        yield lst[i:i+n]
+
+                ai_values = []
+
+                for chunk in split_chunks(file_ids):
+                    docs = extraction_col.find(
+                        {
+                            "fileId": {"$in": chunk},
+                            "aiConfidence": {"$ne": None}
+                        },
+                        {"aiConfidence": 1}
+                    )
+
+                    results = await docs.to_list(length=500)
+                    for d in results:
+                        try:
+                            ai_values.append(d["aiConfidence"])
+                        except:
+                            pass
+
+                if ai_values:
+                    mongo_accuracy_percent = round(sum(ai_values) / len(ai_values), 1)
+                else:
+                    mongo_accuracy_percent = 0.0
+
+        except Exception as e:
+            logger.warning(f"Mongo org accuracy calculation failed: {e}")
+            mongo_accuracy_percent = 0.0
         
         # Additional statistics
         # Template count from templates table
@@ -180,9 +236,10 @@ async def dashboard_summary() -> JSONResponse:
             "success": "Data retrieved successfully",
             "widgets": {
                 "uploaded": uploaded + pg_uploaded,
-                "processed": processed + pg_processed,
+                "processed": count_processed,
                 "pendingReview": pending_review + pg_pending_review,
-                "accuracyPercent": max(mongo_accuracy_percent, pg_accuracy_percent),
+                # "accuracyPercent": max(mongo_accuracy_percent, pg_accuracy_percent),  mongo_accuracy_percent
+                "accuracyPercent": mongo_accuracy_percent,
                 "exceptions": exceptions + pg_exceptions,
                 "needsTemplate": needs_template + pg_needs_template,
                 "needsTemplate": total_templates
