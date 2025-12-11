@@ -50,7 +50,9 @@ async def serialize_usr(doc: dict) -> dict:
 # async def get_notifications(user: Dict[str, Any] = Depends(get_current_user)):
 async def get_notifications():
     try:
-        user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
+        # user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
+        user_id = "b6ee4982-b5ec-425f-894d-4324adce0f36" # rv
+        
         logger.info(f"Fetching notification preferences for user_id: {user_id}")
 
         # pref = await get_notification_pref(user_id)
@@ -62,44 +64,41 @@ async def get_notifications():
         # print("org:", org)
         # print("org:", org)
 
-
-        pref1 = await DB.db.notification_preferences.find({"user_id": user_id},{"_id": 0}).to_list(length=None) 
-        pref2 = await db_module.db.notification_preferences.find({"user_id": user_id},{"_id": 0}).to_list(length=None) 
-        # print("all_members2:", all_members2)
-
+        pref = await db_module.db.notification_preferences.find_one({"user_id": user_id},{"_id": 0})
         print()
-        print("pref1---------->  ", pref1)
-        print()
-        print("pref2---------->  ", pref2)
-        print()
+        print("pref---------->  ", pref)
 
-        all_pref = []
-        for doc in pref:
-            # all_pref.append(await serialize_usr(doc))
-            all_pref.append(doc)
+        all_pref = {
+            "upload_completed" : pref["upload_completed"],
+            "review_required" : pref["review_required"],
+            "export_ready" : pref["export_ready"],
+            "exceptions_detected" : pref["exceptions_detected"]
+        }
         
-        logger.debug(f"Notification preferences data: {pref}")
-        # if not pref:
-        #     logger.warning(f"Preferences not found for user_id: {user_id}")
-        #     raise HTTPException(status_code=404, detail="Preferences not found")
+        
+        logger.debug(f"Notification preferences data: {all_pref}")
+        if not all_pref:
+            logger.warning(f"Preferences not found for user_id: {user_id}")
+            raise HTTPException(status_code=404, detail="Preferences not found")
         
         logger.info(f"Notification preferences fetched for user_id: {user_id}")
-        return pref
+        return all_pref
     except Exception as e:
         logger.error(f"Failed to fetch notification preferences: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch notification preferences")
 
 
 
-
-@router.put("/", response_model=Dict[str, Any])
+@router.patch("/", response_model=Dict[str, Any])
 # async def upsert_notifications(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
 async def upsert_notifications(payload: Dict[str, Any]):
     try:
-        user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
-        payload["user_id"] = user_id
+        # user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
+        user_id = "b6ee4982-b5ec-425f-894d-4324adce0f36" # rv
+        
+        # payload["user_id"] = user_id
 
-        saved = await upsert_notification_pref(payload)
+        saved = await upsert_notification_pref(payload,user_id)
         logger.info(f"Notification preferences upserted for user_id: {user_id}")
         return saved
     except Exception as e:

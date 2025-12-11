@@ -174,7 +174,7 @@ async def dashboard_summary() -> JSONResponse:
                 "needsTemplate": total_templates
             },
             "recentUploadsData": {
-                "total_records": len(table_rows),
+                "total_records": 0,
                 "tableHeaders": [
                     {"field": "fileName", "label": "File Name"},
                     {"field": "payer", "label": "Payer"},

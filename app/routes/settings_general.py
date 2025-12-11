@@ -5,12 +5,20 @@ from ..services.crud import get_org_settings, upsert_org_settings
 from ..services.auth_deps import get_current_user, require_role
 import app.common.db.db as db_module
 from datetime import datetime
+from pydantic import BaseModel
 from ..utils.logger import get_logger
 logger = get_logger(__name__)
 
 from bson import ObjectId
 
 router = APIRouter(prefix="/settings/general", tags=["settings-general"])
+
+
+class UpdateGeneral(BaseModel):
+    name: str
+    timezone: str
+    retention_days: str
+    org_id: str
 
 
 def clean_mongo_doc(doc):
@@ -32,7 +40,8 @@ def clean_mongo_doc(doc):
 async def read_general_settings():
     try:
         logger.info("Fetching general settings for user")        
-        user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
+        # user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
+        user_id = "b6ee4982-b5ec-425f-894d-4324adce0f36" #rv
 
         logger.debug(f"User ID: {user_id}")
         
@@ -104,7 +113,9 @@ async def read_general_settings():
 @router.patch("")
 async def patch_general_settings(payload: Dict[str, Any]):
     try:
-        user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
+        # user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
+        user_id = "b6ee4982-b5ec-425f-894d-4324adce0f36" #rv
+        
         membership = await db_module.db.organization_memberships.find_one({"user_id": user_id})
 
         org_id = membership.get("org_id")
@@ -139,7 +150,7 @@ async def patch_general_settings(payload: Dict[str, Any]):
         }
 
         logger.debug(f"Updated General Settings Data: {generalSettings}")
-        
+
         return {
             "generalSettings": generalSettings,
             # "org_id": org_id,

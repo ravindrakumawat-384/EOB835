@@ -68,8 +68,6 @@ async def insert_retention(r: RetentionPolicy) -> Any:
 
 
 
-
-
 # ======================
 
 
@@ -163,6 +161,23 @@ async def update_team_member(payload: Dict[str, Any]) -> int:
         update_data["full_name"] = payload["name"]
     if "email" in payload:
         update_data["email"] = payload["email"]
+    # usr = db_module.db.users.find_one({"id": payload["email"]}, {"_id": 0})
+    usr = await DB.users.find_one({"email": payload["email"]},{"_id": 0})
+
+    print("usr------------------> ", usr)
+    print("usr------------------> ", usr)
+    print("usr[id]------------------> ", usr["id"])
+
+    usr_org = await DB.organization_memberships.find_one({"user_id": usr["id"]}, {"_id": 0})
+    print("usr_org------------------> ", usr_org)
+
+    role_update = {}
+    role_update["role"] = payload["role"]
+    print("role_update--__> ", role_update)
+
+    res = await DB.organization_memberships.update_one({"user_id": usr["id"]}, {"$set": role_update})
+    print("res----------------->>>> ", res)
+    
     # Convert status string to boolean
     if "status" in payload:
         status_value = payload["status"]
@@ -172,10 +187,11 @@ async def update_team_member(payload: Dict[str, Any]) -> int:
             update_data["is_active"] = bool(status_value)    
 
     print("update_data in crud:", update_data)
-    res = await DB.users.update_one({"id": payload["userId"]}, {"$set": update_data})
+    res2 = await DB.users.update_one({"id": payload["userId"]}, {"$set": update_data})
+    print("res2----------------->>>> ", res2)
     
     # logger.info(f"Updated team member {payload['userId']} with data: {update_data}")
-    return res.modified_count
+    return {"success":"User details updated successfully"}
 
 
 async def delete_team_member(member_id: str, org_id: str) -> int:
@@ -190,9 +206,9 @@ async def get_notification_pref(user_id: str) -> Optional[Dict[str, Any]]:
     return await db.notification_preferences.find_one({"user_id": user_id})
 
 
-async def upsert_notification_pref(payload: Dict[str, Any]) -> Dict[str, Any]:
+async def upsert_notification_pref(payload: Dict[str, Any], user_id) -> Dict[str, Any]:
     payload["updated_at"] = datetime.utcnow()
-    
+    print("user_id", user_id)
     update_data = {}
     if "upload_completed" in payload:
         update_data["upload_completed"] = payload["upload_completed"]
@@ -203,6 +219,9 @@ async def upsert_notification_pref(payload: Dict[str, Any]) -> Dict[str, Any]:
     if "exceptions_detected" in payload:
         update_data["exceptions_detected"] = payload["exceptions_detected"]
 
+    print()
+    print("update_data", update_data)
+
     # # Convert status string to boolean
     # if "status" in payload:
     #     status_value = payload["status"]
@@ -212,8 +231,12 @@ async def upsert_notification_pref(payload: Dict[str, Any]) -> Dict[str, Any]:
     #         update_data["is_active"] = bool(status_value)
 
 
-    await DB.notification_preferences.update_one({"user_id": payload["user_id"]}, {"$set": payload}, upsert=True)
-    logger.info(f"Upserted notification preferences for user_id: {payload['user_id']}")
+    aa = await DB.notification_preferences.update_one({"user_id": user_id}, {"$set": payload}, upsert=True)
+    print()
+    print("aaaaaaaaaaaa--------->", aa)
+    print()
+    
+    logger.info(f"Upserted notification preferences for user_id: {user_id}")
 
     return {"Message": "Notification Preferences Updated Successfully"}
 

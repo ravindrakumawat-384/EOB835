@@ -20,10 +20,16 @@ router = APIRouter(prefix="/settings/users", tags=["settings-users"])
 
 # -------------------- SCHEMAS --------------------
 class InviteUser(BaseModel):
-    full_name: str
+    name: str
     email: str
     role: str
 
+class UpdateUser(BaseModel):
+    name: str
+    email: str
+    role: str
+    status: bool
+    userId: str
 
 class TableHeaderAction(BaseModel):
     type: str
