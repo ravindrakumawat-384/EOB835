@@ -77,13 +77,19 @@ async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
         # 6. Store metadata in PostgreSQL
         # Replace these with actual values from context/session/request
         org_id = "9ac493f7-cc6a-4d7d-8646-affb00ed58da"
+        # org_id = "57a0f4e2-8076-4910-8259-9d06338965e9"
         batch_id = None
         mime_type = file.content_type or "application/octet-stream"
         logger.info(f"Processing file: {file.filename}, size: {len(content)}, mime_type: {mime_type}")
         file_size = len(content)
         upload_source = "manual"
+<<<<<<< HEAD
         uploaded_by = "b729c531-7c90-4602-b541-e910d45b0a0d"  
         uploaded_by = "9f44298b-5e30-4a7c-a8cb-1ae003cd9134"
+=======
+        uploaded_by = "b729c531-7c90-4602-b541-e910d45b0a0d" 
+        # uploaded_by = "57a0f4e2-8076-4910-8259-9d06338965e9"  
+>>>>>>> 143befa8dfd3334ddce2d2e5d52e0db56bbb87ce
         file_id = insert_upload_file(
             org_id=org_id,
             batch_id=batch_id,
@@ -234,4 +240,4 @@ async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
             "claim_ids": claim_ids,
             "payer_template_status": payer_template_status
         })
-    return {"results": responses}
+    return {"success": "File Upload successfully."}

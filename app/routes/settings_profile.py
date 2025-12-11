@@ -47,7 +47,27 @@ async def get_user_profile():
     - Date Format
     """
     try:
-        user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
+        # user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
+        user_id = "b6ee4982-b5ec-425f-894d-4324adce0f36" # rv
+
+        print("user_id-----> ", user_id)
+        print("user_id-----> ", user_id)
+        print("user_id-----> ", user_id)
+        print("user_id-----> ", user_id)
+        print("user_id-----> ", user_id)
+        print("user_id-----> ", user_id)
+        print("user_id-----> ", user_id)
+        print("user_id-----> ", user_id)
+        print("user_id-----> ", user_id)
+        print("user_id-----> ", user_id)
+        print("user_id-----> ", user_id)
+        print("user_id-----> ", user_id)
+        print("user_id-----> ", user_id)
+        print("user_id-----> ", user_id)
+        print("user_id-----> ", user_id)
+        print("user_id-----> ", user_id)
+        print("user_id-----> ", user_id)
+        
         logger.info(f"Fetching user profile for user_id: {user_id}")
 
         # Get user details
@@ -75,6 +95,20 @@ async def get_user_profile():
         org = await db_module.db.organizations.find_one({"id": org_id})
         org = clean_mongo_doc(org)
         org_name = org.get("name") if org else None
+        print("org_name-----> ", org_name)
+        print("org_name-----> ", org_name)
+        print("org_name-----> ", org_name)
+        print("org_name-----> ", org_name)
+        print("org_name-----> ", org_name)
+        print("org_name-----> ", org_name)
+        print("org_name-----> ", org_name)
+        print("org_name-----> ", org_name)
+        print("org_name-----> ", org_name)
+        print("org_name-----> ", org_name)
+        print("org_name-----> ", org_name)
+        print("org_name-----> ", org_name)
+        print("org_name-----> ", org_name)
+        print("org_name-----> ", org_name)
         
         # Extract profile information
         profile_data = {
