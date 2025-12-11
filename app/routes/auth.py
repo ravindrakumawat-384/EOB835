@@ -333,7 +333,7 @@ async def change_password(payload: ChangePasswordRequest):
     """
     Allow authenticated user to change their password.
     Verifies old password, updates to new password, and revokes all refresh tokens for security.
-    """
+    """ 
     try:
         # user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
         # user_id = "b6ee4982-b5ec-425f-894d-4324adce0f36" # rv
