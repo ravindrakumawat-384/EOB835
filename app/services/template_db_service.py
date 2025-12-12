@@ -6,11 +6,10 @@ import psycopg2
 from pymongo import MongoClient
 from ..services.pg_upload_files import get_pg_conn
 from ..utils.logger import get_logger
-logger = get_logger(__name__)
-
 from app.common.db.db import init_db
-DB = init_db()
 
+logger = get_logger(__name__)
+DB = init_db() 
 
 payer_ids = ''
 def extract_and_save_payer_data(json_data: dict, org_id: str, filename: str = None) -> Optional[str]:
@@ -182,8 +181,6 @@ def extract_and_save_payer_data(json_data: dict, org_id: str, filename: str = No
         
         conn.commit()
         logger.info(f"✅ Created new payer from template JSON: {payer_name} (ID: {payer_id})")
-        logger.info(f"Payer AI Detection Metadata: {json.dumps(ai_detection_metadata, indent=2)}")
-        payer_ids += payer_id
         return payer_id
         
     except Exception as e:
@@ -195,14 +192,14 @@ def extract_and_save_payer_data(json_data: dict, org_id: str, filename: str = No
         conn.close()
 
 # MongoDB connection for template builder sessions
-def get_mongo_conn():
-    """Get MongoDB client connection for template builder sessions."""
-    try:
-        client = MongoClient("mongodb://localhost:27017/")
-        return client
-    except Exception as e:
-        logger.error(f"Failed to connect to MongoDB: {e}")
-        raise
+# def get_mongo_conn():
+#     """Get MongoDB client connection for template builder sessions."""
+#     try:
+#         client = MongoClient("mongodb://localhost:27017/")
+#         return client
+#     except Exception as e:
+#         logger.error(f"Failed to connect to MongoDB: {e}")
+#         raise
 
 def create_template_in_postgres(
     name: str,
