@@ -29,7 +29,7 @@ def is_admin(user: Dict[str, Any]) -> bool:
 
 def require_role(allowed_roles: list[str]):
     async def checker(user: Dict[str, Any] = Depends(get_current_user)):
-        role = user.get("role", "Viewer")
+        role = user.get("role", "viewer")
         # Admins have access to all functionality
         if role == "Admin":
             return user

@@ -18,7 +18,6 @@ from ..common.db.models import OrganizationMembership
 from ..services.auth_deps import get_current_user
 from fastapi import Request
 import bson
-from bson import ObjectId
 
 
 from ..utils.logger import get_logger

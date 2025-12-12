@@ -51,22 +51,6 @@ async def get_user_profile():
         user_id = "b6ee4982-b5ec-425f-894d-4324adce0f36" # rv
 
         print("user_id-----> ", user_id)
-        print("user_id-----> ", user_id)
-        print("user_id-----> ", user_id)
-        print("user_id-----> ", user_id)
-        print("user_id-----> ", user_id)
-        print("user_id-----> ", user_id)
-        print("user_id-----> ", user_id)
-        print("user_id-----> ", user_id)
-        print("user_id-----> ", user_id)
-        print("user_id-----> ", user_id)
-        print("user_id-----> ", user_id)
-        print("user_id-----> ", user_id)
-        print("user_id-----> ", user_id)
-        print("user_id-----> ", user_id)
-        print("user_id-----> ", user_id)
-        print("user_id-----> ", user_id)
-        print("user_id-----> ", user_id)
         
         logger.info(f"Fetching user profile for user_id: {user_id}")
 
@@ -96,38 +80,25 @@ async def get_user_profile():
         org = clean_mongo_doc(org)
         org_name = org.get("name") if org else None
         print("org_name-----> ", org_name)
-        print("org_name-----> ", org_name)
-        print("org_name-----> ", org_name)
-        print("org_name-----> ", org_name)
-        print("org_name-----> ", org_name)
-        print("org_name-----> ", org_name)
-        print("org_name-----> ", org_name)
-        print("org_name-----> ", org_name)
-        print("org_name-----> ", org_name)
-        print("org_name-----> ", org_name)
-        print("org_name-----> ", org_name)
-        print("org_name-----> ", org_name)
-        print("org_name-----> ", org_name)
-        print("org_name-----> ", org_name)
-        
-        # Extract profile information
+
+
         profile_data = {
-            "profilePhoto": {
-                "email": user_data.get("email", ""),
-                "role": role,
-                "status": "Active" if user_data.get("is_active", True) else "Inactive",
-                # "photoPath": user_data.get("photo_path"),
-            },
-            "personalInformation": {
+            "personalDetails": {
                 "firstName": first_name,
                 "lastName": last_name,
                 "email": user_data.get("email", ""),
-                "phoneNumber": user_data.get("phone_number", "N/A"),
+                "phone": user_data.get("phone_number", "N/A"),
+                "organization": org_name,
+                "location": user_data.get("location", "N/A"),
+                "timezone": user_data.get("timezone", "pt"),
+                "dateFormat": user_data.get("date_format", "MM/DD/YYYY")
             },
-            "organization": org_name,
-            "location": user_data.get("location", "N/A"),
-            "timezone": user_data.get("timezone", "pt"),
-            "dateFormat": user_data.get("date_format", "MM/DD/YYYY"),
+            
+            "profileDetails": {
+                "email": user_data.get("email", ""),
+                "role": role,
+                "status": "Active" if user_data.get("is_active", True) else "Inactive",
+            }
         }
         
         logger.info(f"User profile fetched successfully for user_id: {user_id}")
@@ -152,7 +123,15 @@ async def update_user_profile(payload: Dict[str, Any]):
     - Profile Photo
     """
     try:
-        user_id = "efd59952-d01f-4872-94cb-4232349655b8"
+        print("payload   update_user_profile:", payload)
+        print("payload   update_user_profile:", payload)
+        print("payload   update_user_profile:", payload)
+        print("payload   update_user_profile:", payload)
+        print("payload   update_user_profile:", payload)
+        print("payload   update_user_profile:", payload)
+
+
+        user_id = "b6ee4982-b5ec-425f-894d-4324adce0f36" # rv
         
         # Get user details
         user_data = await db_module.db.users.find_one({"id": user_id})
@@ -173,6 +152,7 @@ async def update_user_profile(payload: Dict[str, Any]):
                 update_data["last_name"] = personal_info["lastName"]
             if "phoneNumber" in personal_info:
                 update_data["phone_number"] = personal_info["phoneNumber"]
+                
         
         # Update location, timezone, date format
         if "location" in payload:
@@ -208,26 +188,38 @@ async def update_user_profile(payload: Dict[str, Any]):
         org_name = org.get("name") if org else None
         
         # Return updated profile data
+        # aa =    { 
+        #     "profilePhoto": {
+        #         "firstName": updated_user.get("first_name", ""),
+        #         "lastName": updated_user.get("last_name", ""),
+        #         "email": updated_user.get("email", ""),
+        #         "role": role,
+        #         "status": "Active" if updated_user.get("is_active", True) else "Inactive",
+        #         "photoPath": updated_user.get("photo_path"),
+        #     }}
+        
         profile_data = {
-            "profilePhoto": {
+            "personalDetails": {
                 "firstName": updated_user.get("first_name", ""),
                 "lastName": updated_user.get("last_name", ""),
                 "email": updated_user.get("email", ""),
+                "phone": updated_user.get("phone_number", ""),
+                "organization": org_name,
+                "location": updated_user.get("location", ""),
+                "timezone": updated_user.get("timezone", "UTC"),
+                "dateFormat": updated_user.get("date_format", "MM/DD/YYYY"),
+            },
+
+            "profileDetails": {
+                "email": user_data.get("email", ""),
                 "role": role,
-                "status": "Active" if updated_user.get("is_active", True) else "Inactive",
-                "photoPath": updated_user.get("photo_path"),
-            },
-            "personalInformation": {
-                "firstName": updated_user.get("first_name", ""),
-                "lastName": updated_user.get("last_name", ""),
-                "email": updated_user.get("email", ""),
-                "phoneNumber": updated_user.get("phone_number", ""),
-            },
-            "organization": org_name,
-            "location": updated_user.get("location", ""),
-            "timezone": updated_user.get("timezone", "UTC"),
-            "dateFormat": updated_user.get("date_format", "MM/DD/YYYY"),
+                "status": "Active" if user_data.get("is_active", True) else "Inactive",
+            }
         }
+
+        print()
+        print("profile data after update:", profile_data)
+
         logger.info(f"User profile updated successfully for user_id: {user_id}")
         return profile_data
         
