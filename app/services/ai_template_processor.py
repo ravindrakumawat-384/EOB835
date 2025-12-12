@@ -231,6 +231,11 @@ def convert_text_to_dynamic_json(raw_text: str, dynamic_keys: List[str], filenam
         
         Required JSON structure:
         {{
+            "payer_info": {{
+                "payer_name": "Insurance Company Name",
+                "code": "PAYER123",
+                "confidence": 90
+            }},
             "payments": [
                 {{
                     "payment_reference": "actual_value_from_text_or_null",
