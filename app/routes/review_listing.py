@@ -8,8 +8,20 @@ import re
 import datetime
 from app.common.db.review_listing_schema import *
 from ..services.pg_upload_files import get_pg_conn
+from pydantic import BaseModel
 
 logger = get_logger(__name__)
+
+
+class UpdateReviewerRequest(BaseModel):
+    file_id: str
+    reviewer_id: str
+
+class UpdateReviewerResponse(BaseModel):
+    status: int
+    message: str
+    file_id: str
+    reviewer_id: str
 
 
 # --- helpers ---
@@ -53,7 +65,7 @@ batches_col = db_module.db["upload_batches"]    # upload batches (field: created
 
 router = APIRouter(prefix="/review_queue", tags=["review"])
 
-@router.get("/summary", response_model=ReviewResponse, response_model_exclude_none=True)
+@router.get("/summary", response_model=None, response_model_exclude_none=True)
 async def review_queue(
     org_id: str = Query(..., description="organization id (required)"),
     search: Optional[str] = Query(None, description="Search across filename, claim_id, patient_name, reviewer, payer, status, confidence"),
@@ -68,12 +80,22 @@ async def review_queue(
     try:
         if not org_id:
             raise HTTPException(status_code=400, detail={"message": "missing_org_id"})
+        
         if status == "pending":
             status = "Pending_Review"
+        elif status == "failed":
+            status = "failed"
+        elif status == "warning":
+            status = "warning"
+        elif status == "exception":
+            status = "exception"
         else:
             status = status
-        
-        q = search
+        # normalize incoming filters
+        q = (search or "").strip()
+        payer = payer.strip() if payer else None
+        status = status.strip() if status else None
+        confidence_cat = (confidence_cat or "").strip()
 
         # sort mapping
         sort_map = {
@@ -89,59 +111,66 @@ async def review_queue(
         mapped_sort = sort_map.get(sort_by, "uf.uploaded_at")
         sort_dir_val = "DESC" if str(sort_dir).lower() == "desc" else "ASC"
 
+        # obtain a Postgres connection from your project util
         pg = get_pg_conn()
 
-        # --- UI config mappings (short codes -> display names) ---
+        # UI config maps
         payer_code_map = {
             "bcbs": "Blue Cross Blue Shield",
             "aetna": "Aetna",
             "united": "United Healthcare",
             "cigna": "Cigna",
             "medicare": "Medicare",
-            "all": None
+            "all": None,
         }
         status_code_map = {
             "pending": "Pending Review",
             "warning": "Warning",
             "failed": "Failed Validation",
             "exception": "Exception",
-            "all": None
+            "all": None,
         }
 
-        # --- build reviewer dropdown options ---
+        # build reviewer dropdown options
         cur_opts2 = pg.cursor()
         try:
-            cur_opts2.execute("""
+            cur_opts2.execute(
+                """
                 SELECT DISTINCT u.id::text, u.full_name
                 FROM organization_memberships m
                 JOIN users u ON u.id = m.user_id
                 WHERE m.org_id = %s AND m.role = 'reviewer'
                 ORDER BY u.full_name
-            """, (org_id,))
+                """,
+                (org_id,),
+            )
             reviewer_rows = cur_opts2.fetchall()
-            reviewer_options = [{"label": "Unassigned", "value": "Unassigned"}] + [
-                {"label": rr[1], "value": rr[1]} for rr in reviewer_rows if rr[1]
+            reviewer_options = [{"label": "Unassigned", "value": "unassigned"}] + [
+                {"label": rr[1], "value": rr[0]} for rr in reviewer_rows if rr[1]
             ]
         finally:
             cur_opts2.close()
 
-        # canonical headers (no editable on payer/status; reviewer has dropdown options)
         final_headers = [
             {"field": "fileName", "label": "File"},
             {"field": "payer", "label": "Payer"},
             {"field": "confidence", "label": "Confidence"},
             {"field": "status", "label": "Status"},
-            {"field": "reviewer", "label": "Reviewer", "editable": {"type": "dropdown", "placeholder": "Select Reviewer", "options": reviewer_options}},
+            {
+                "field": "reviewer",
+                "label": "Reviewer",
+                "editable": {"type": "dropdown", "placeholder": "Select Reviewer", "options": reviewer_options},
+            },
             {"field": "uploaded", "label": "Uploaded"},
             {"label": "Actions", "actions": [{"type": "view", "icon": "pi pi-eye", "styleClass": "p-button-text p-button-sm"}]},
         ]
 
         # -------------------------
-        # 1) CONFIDENCE -> get matching file ids from Mongo (unless 'all' or None)
+        # 1) CONFIDENCE -> get matching file ids from Mongo (aiConfidence) and restrict SQL by those ids
         # -------------------------
         mongo_file_ids: Optional[List[str]] = None
         if confidence_cat and confidence_cat.lower() != "all":
-            c = confidence_cat.strip().lower()
+            c = confidence_cat.lower()
             if c == "high":
                 match_expr = {"$gte": 90}
             elif c == "medium":
@@ -158,18 +187,22 @@ async def review_queue(
                     {"$group": {"_id": "$fileId", "aiConfidence": {"$first": "$aiConfidence"}, "overallConfidence": {"$first": "$overallConfidence"}}},
                     {"$addFields": {"confidence": {"$convert": {"input": {"$ifNull": ["$aiConfidence", "$overallConfidence", 0]}, "to": "double", "onError": 0, "onNull": 0}}}},
                     {"$match": {"confidence": match_expr}},
-                    {"$project": {"_id": 1}}
+                    {"$project": {"_id": 1}},
                 ]
                 mongo_docs = await db_module.db["extraction_results"].aggregate(mongo_pipeline).to_list(length=None)
                 mongo_file_ids = [str(d["_id"]) for d in mongo_docs]
 
+                # If there are no extraction results matching the confidence bucket, return empty set
                 if not mongo_file_ids:
-                    return {
-                        "tableHeaders": final_headers,
-                        "tableData": [],
-                        "pagination": {"total": 0, "page": page, "page_size": page_size},
-                        "totalRecords": 0,
-                    }
+                    return JSONResponse(
+                        content={
+                            "tableHeaders": final_headers,
+                            "tableData": [],
+                            "pagination": {"total": 0, "page": page, "page_size": page_size},
+                            "totalRecords": 0,
+                        },
+                        status_code=200,
+                    )
 
         # -------------------------
         # 2) BUILD SQL WHERE CLAUSES FOR upload_files
@@ -177,16 +210,23 @@ async def review_queue(
         where_clauses = ["uf.org_id = %s"]
         params: List[Any] = [org_id]
 
-        # status filter using status_code_map; 'all' or None means no filter
+        # status filter using status_code_map; support comma-separated values; 'all' or None means no filter
         if status and status.lower() != "all":
-            mapped_status = status_code_map.get(status.lower(), None)
-            if mapped_status:
-                where_clauses.append("uf.processing_status ILIKE %s")
-                params.append(mapped_status)
-            else:
-                # if not in mapping, treat provided status as literal substring match
-                where_clauses.append("uf.processing_status ILIKE %s")
-                params.append(f"%{status}%")
+            terms = [s.strip() for s in status.split(",") if s.strip()]
+            status_sub = []
+            for t in terms:
+                t_low = t.lower()
+                mapped = status_code_map.get(t_low)
+                if mapped:
+                    # exact match (case-insensitive)
+                    status_sub.append("uf.processing_status ILIKE %s")
+                    params.append(mapped)
+                else:
+                    # direct DB search for provided text (case-insensitive exact)
+                    status_sub.append("uf.processing_status ILIKE %s")
+                    params.append(t)
+            if status_sub:
+                where_clauses.append("(" + " OR ".join(status_sub) + ")")
 
         # payer filter: support short codes, names, comma-separated; 'all' means no filter
         if payer and payer.lower() != "all":
@@ -195,11 +235,9 @@ async def review_queue(
             for t in terms:
                 t_low = t.lower()
                 if t_low in payer_code_map and payer_code_map[t_low]:
-                    # mapped display name
                     payer_sub.append("p.name ILIKE %s")
                     params.append(f"%{payer_code_map[t_low]}%")
                 else:
-                    # try matching by payer.id text or name substring
                     payer_sub.append("p.id::text = %s")
                     params.append(t)
                     payer_sub.append("p.name ILIKE %s")
@@ -235,7 +273,7 @@ async def review_queue(
                 COALESCE(p.name, 'Unknown') AS payer_name,
                 uf.ai_payer_confidence,
                 uf.processing_status,
-                u.full_name AS reviewer_name,
+                uf.reviwer_id AS reviewer_id,
                 uf.uploaded_at
             FROM upload_files uf
             LEFT JOIN payers p ON p.id::text = uf.detected_payer_id::text
@@ -265,12 +303,18 @@ async def review_queue(
             cur.close()
 
         if not pg_rows:
-            return {
-                "tableHeaders": final_headers,
-                "tableData": [],
-                "pagination": {"total": 0, "page": page, "page_size": page_size},
-                "totalRecords": 0,
+            reviewTableData = {
+                "success": "No Data Found.",
+    
+                "tableData": {
+                    "tableHeaders": final_headers,
+                    "tableData": [],
+                    "pagination": {"total": 0, "page": page, "page_size": page_size},
+                    "total_records": 0,
+                },
             }
+            return JSONResponse(content=reviewTableData, status_code=200)
+         
 
         # -------------------------
         # 3) For returned upload_files, get latest extraction (confidence + payerName) from Mongo
@@ -279,7 +323,7 @@ async def review_queue(
         mongo_pipeline2 = [
             {"$match": {"fileId": {"$in": file_ids}, "orgId": org_id}},
             {"$sort": {"createdAt": -1}},
-            {"$group": {"_id": "$fileId", "aiConfidence": {"$first": "$aiConfidence"}, "overallConfidence": {"$first": "$overallConfidence"}, "payerName": {"$first": "$payerName"}}}
+            {"$group": {"_id": "$fileId", "aiConfidence": {"$first": "$aiConfidence"}, "overallConfidence": {"$first": "$overallConfidence"}, "payerName": {"$first": "$payerName"}}},
         ]
         mongo_docs2 = await db_module.db["extraction_results"].aggregate(mongo_pipeline2).to_list(length=None)
         confidence_lookup: Dict[str, float] = {}
@@ -308,14 +352,14 @@ async def review_queue(
         for r in pg_rows:
             fid = str(r[0])
             filename = r[1] or ""
-            # prefer payer from extraction if exists, otherwise payer_name from upload_files
             payer_name = payer_lookup.get(fid, r[2] or "Unknown")
             pg_conf_val = r[3]
             proc_status = r[4] or "Pending Review"
-            reviewer_name = r[5] or "Unassigned"
+            reviewer_name = r[5] or "unassigned"
             uploaded_at = r[6]
 
             conf_percent = confidence_lookup.get(fid)
+            print("conf_percent======",conf_percent)
             if conf_percent is None:
                 try:
                     conf_percent = float(pg_conf_val) if pg_conf_val is not None else 0.0
@@ -328,11 +372,12 @@ async def review_queue(
                 conf_label = "Medium"
             else:
                 conf_label = "Low"
-            confidence_str = f"{conf_label} {int(round(conf_percent))}%"
+            confidence_str = f"{int(round(conf_percent))}%"
 
             uploaded_str = uploaded_at.strftime("%Y-%m-%d") if isinstance(uploaded_at, (datetime.datetime, datetime.date)) else (str(uploaded_at)[:10] if uploaded_at else None)
 
             table_rows.append({
+                "file_id": fid,
                 "fileName": filename,
                 "payer": payer_name,
                 "confidence": confidence_str,
@@ -341,30 +386,52 @@ async def review_queue(
                 "uploaded": uploaded_str,
             })
 
-        # -------------------------
-        # 5) Client-side defensive filtering (if any left) and final counts
-        # -------------------------
-        # (payer and status filtering already applied server-side where possible)
-        if q:
-            ql = q.lower()
-            table_rows = [rec for rec in table_rows if ql in (rec["fileName"] or "").lower() or ql in (rec["payer"] or "").lower() or ql in (rec["status"] or "").lower() or ql in (rec["reviewer"] or "").lower() or ql in (rec["confidence"] or "").lower()]
-
-        total_filtered = len(table_rows)
-        table_data = table_rows[:page_size]
-
-        # -------------------------
-        # 6) Response
-        # -------------------------
-      
-
-        reviewTableData = {"success": "Data fetched successfully",
-                            "tableData": {"tableHeaders": final_headers,
-                                         "tableData": table_data,
-                                         "pagination": {"total": total_filtered, "page": page, "page_size": page_size},
-                                         "total_records": total_filtered,}}
+        # final response uses server-side COUNT and rows
+        reviewTableData = {
+            "success": "Data fetched successfully",
+            # "tableHeaders": final_headers,
+            "tableData": {
+                "tableHeaders": final_headers,
+                "tableData": table_rows,
+                "pagination": {"total": total_sql_count, "page": page, "page_size": page_size},
+                "total_records": total_sql_count,
+            },
+        }
 
         return JSONResponse(content=reviewTableData, status_code=200)
 
     except Exception as exc:
-        logger.exception("review_queue error: %s", exc, exc_info=True)
+        import logging
+
+        logging.exception("review_queue error: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Something went wrong while fetching review queue listing data.")
+
+
+@router.patch("/update_reviewer", response_model=UpdateReviewerResponse)
+async def update_reviewer(payload: UpdateReviewerRequest):
+    conn = get_pg_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            UPDATE upload_files
+            SET reviwer_id = %s
+            WHERE id = %s
+            """,
+            (payload.reviewer_id, payload.file_id),
+        )
+        conn.commit()
+
+        return UpdateReviewerResponse(
+            status=200,
+            message="Reviewer updated successfully",
+            file_id=payload.file_id,
+            reviewer_id=payload.reviewer_id,
+        )
+    except Exception as exc:
+        conn.rollback()
+        logger.exception("update_reviewer error: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Something went wrong while updating reviewer.")
+    finally:
+        cur.close()
+        conn.close()
