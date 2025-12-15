@@ -1,10 +1,10 @@
-from datetime import datetime, timedelta
-from typing import Dict, Any
-from jose import jwt
 from passlib.context import CryptContext
-from uuid import uuid4
-
+from datetime import datetime, timedelta
+from typing import Dict, Any, Tuple
+from jose import jwt, JWSError
 from ..common.config import settings
+from uuid import uuid4
+from ..services.email_service import send_reset_email
 
 _pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -55,23 +55,53 @@ def create_refresh_token(subject: str) -> str:
     return token
 
 
-def create_reset_token(subject: str) -> str:
+def create_reset_token(subject: str, email) -> str:
     """Short-lived token used for password reset"""
     now = _now()
-    expire = now + timedelta(minutes=settings.RESET_TOKEN_EXPIRE_MINUTES)
-    payload = {
-        "sub": subject,
-        "type": "reset",
-        "exp": int(expire.timestamp()),
-        "iat": int(now.timestamp()),
-        "jti": str(uuid4()),
-    }
-    print(f"[create_reset_token] iat: {payload['iat']} ({datetime.utcfromtimestamp(payload['iat'])}), exp: {payload['exp']} ({datetime.utcfromtimestamp(payload['exp'])})")
-    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    print("got  email-------> ", email)
+    print("got  email-------> ", email)
+    print("got  email-------> ", email)
+    # expire = now + timedelta(minutes=settings.RESET_TOKEN_EXPIRE_MINUTES)
+    # payload = {
+    #     "sub": subject,
+    #     "type": "reset",
+    #     "exp": int(expire.timestamp()),
+    #     "iat": int(now.timestamp()),
+    #     "jti": str(uuid4()),
+    # }
+    # reset_payload = {"sub": subject, "exp": expire.isoformat(), "iat": now.isoformat(), "type": "reset"}
+
+
+    # now = datetime.utcnow()
+    print("subject---> ", subject)
+    print("subject---> ", subject)
+    print("subject---> ", subject)
+    # exp = now + timedelta(hours=1)
+    exp = datetime.utcnow() + timedelta(hours=1)
+    iat = datetime.utcnow()
+
+
+    reset_payload = {"sub": subject, "exp": exp, "iat": iat, "type": "reset"}
+    reset_token = jwt.encode(reset_payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    print()
+    print("reset_token---> ", reset_token)
+    print()
+    # reset_link = f"https://your-frontend/reset-password?token={reset_token}"
+
+    send_reset_email(email, reset_token)
+    # sent = send_reset_email(user["email"], token)
+    return {"message": "Password reset link has been sent to your email."}
+
+
+
+    # print(f"[create_reset_token] iat: {payload['iat']} ({datetime.utcfromtimestamp(payload['iat'])}), exp: {payload['exp']} ({datetime.utcfromtimestamp(payload['exp'])})")
+    return jwt.encode(reset_payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    # return jwt.encode(payload["jti"])
+    # return payload["jti"]
 
 
 def decode_token(token: str) -> Dict[str, Any]:
+    print("Enter in Decoding token:") 
     print("Enter in Decoding token:", token) 
-    print("JWT Secret:", settings.JWT_SECRET)
-    print("JWT Algorithm:", settings.JWT_ALGORITHM)
+    print("Return decode token===> ")
     return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])

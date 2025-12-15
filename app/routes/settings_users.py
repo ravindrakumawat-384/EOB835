@@ -101,7 +101,7 @@ async def serialize_usr(doc: dict) -> UserItem:
 async def get_users():
     try:
         # TODO: Replace with actual logged-in user
-        user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775"
+        user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4"
 
         org = await db_module.db.organization_memberships.find_one({"user_id": user_id})
         if not org:
@@ -179,7 +179,7 @@ async def get_users():
 @router.post("/")
 async def post_user(payload: Dict[str, Any]):
     try:
-        user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775"  # admin
+        user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4"  # admin
 
         # find new user
         usr = await db_module.db.users.find_one({"email": payload["email"]}, {"_id": 0})
@@ -211,7 +211,9 @@ async def post_user(payload: Dict[str, Any]):
 @router.patch("/")
 async def patch_user(payload: Dict[str, Any]):
     try:
+        print()
         print("payload in patch_user:", payload)
+        print()
         updated = await update_team_member(payload)
 
         if not updated:
@@ -228,7 +230,7 @@ async def patch_user(payload: Dict[str, Any]):
 @router.delete("/{member_id}")
 async def del_user(member_id: str):
     try:
-        admin_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775"
+        admin_id = "6f64216e-7fbd-4abc-b676-991a121a95e4"
 
         org = await db_module.db.organization_memberships.find_one({"user_id": admin_id})
         org_id = org.get("org_id")

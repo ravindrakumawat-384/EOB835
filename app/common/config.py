@@ -16,15 +16,18 @@ class Settings(BaseSettings):
     # JWT
     JWT_SECRET: str = Field("cc50ec6192f5f20c2931a99dd3ab22625df90527af1b56fc2d5516dff3c43e6b", env="JWT_SECRET")
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 1
 
     # Password reset token expiry (minutes)
-    RESET_TOKEN_EXPIRE_MINUTES: int = 300
+    RESET_TOKEN_EXPIRE_MINUTES: int = 30
 
     # Email stub "from"
     DEFAULT_FROM_EMAIL: str = "noreply@eob.example"
     CORS_ORIGINS: Optional[str] = "*"
+
+    # Frontend URL used to build password reset links. Override in .env
+    FRONTEND_URL: Optional[str] = "http://localhost:4200"
 
     # AWS S3 Configuration
     AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")

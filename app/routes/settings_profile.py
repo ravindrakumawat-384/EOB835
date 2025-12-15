@@ -1,10 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from typing import Dict, Any, Optional
 from ..services.auth_deps import get_current_user
 import app.common.db.db as db_module
 from ..utils.logger import get_logger
 from datetime import datetime
+import os
 from bson import ObjectId
+
+from app.common.db.db import init_db
+DB = init_db()
 
 logger = get_logger(__name__)
 
@@ -48,7 +52,7 @@ async def get_user_profile():
     """
     try:
         # user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
-        user_id = "b6ee4982-b5ec-425f-894d-4324adce0f36" # rv
+        user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
 
         print("user_id-----> ", user_id)
         
@@ -56,12 +60,12 @@ async def get_user_profile():
 
         # Get user details
         user_data = await db_module.db.users.find_one({"id": user_id})
+        user_prof_data = await db_module.db.user_profiles.find_one({"user_id": user_id})
         if not user_data:
             logger.warning(f"User not found: {user_id}")
             raise HTTPException(status_code=404, detail="User not found")
         
         full_name = user_data.get("full_name")
-
         parts = full_name.strip().split()
         first_name = parts[0] if parts else ""
         last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
@@ -87,11 +91,11 @@ async def get_user_profile():
                 "firstName": first_name,
                 "lastName": last_name,
                 "email": user_data.get("email", ""),
-                "phone": user_data.get("phone_number", "N/A"),
+                "phone": user_prof_data.get("mobile", "N/A"),
                 "organization": org_name,
-                "location": user_data.get("location", "N/A"),
-                "timezone": user_data.get("timezone", "pt"),
-                "dateFormat": user_data.get("date_format", "MM/DD/YYYY")
+                "location": user_prof_data.get("location", "N/A"),
+                "timezone": user_prof_data.get("timezone", "pt"),
+                "dateFormat": user_prof_data.get("date_format", "MM/DD/YYYY")
             },
             
             "profileDetails": {
@@ -124,14 +128,8 @@ async def update_user_profile(payload: Dict[str, Any]):
     """
     try:
         print("payload   update_user_profile:", payload)
-        print("payload   update_user_profile:", payload)
-        print("payload   update_user_profile:", payload)
-        print("payload   update_user_profile:", payload)
-        print("payload   update_user_profile:", payload)
-        print("payload   update_user_profile:", payload)
 
-
-        user_id = "b6ee4982-b5ec-425f-894d-4324adce0f36" # rv
+        user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
         
         # Get user details
         user_data = await db_module.db.users.find_one({"id": user_id})
@@ -140,91 +138,141 @@ async def update_user_profile(payload: Dict[str, Any]):
             logger.warning(f"User not found: {user_id}")
             raise HTTPException(status_code=404, detail="User not found")
         
-        # Prepare update data
-        update_data = {}
-        
-        # Update personal information
-        if "personalInformation" in payload:
-            personal_info = payload.get("personalInformation", {})
-            if "firstName" in personal_info:
-                update_data["first_name"] = personal_info["firstName"]
-            if "lastName" in personal_info:
-                update_data["last_name"] = personal_info["lastName"]
-            if "phoneNumber" in personal_info:
-                update_data["phone_number"] = personal_info["phoneNumber"]
-                
-        
-        # Update location, timezone, date format
-        if "location" in payload:
-            update_data["location"] = payload["location"]
-        if "timezone" in payload:
-            update_data["timezone"] = payload["timezone"]
-        if "dateFormat" in payload:
-            update_data["date_format"] = payload["dateFormat"]
-        
-        # Update profile photo
-        if "photoPath" in payload:
-            update_data["photo_path"] = payload["photoPath"]
-        
-        # Add timestamp
-        update_data["updated_at"] = datetime.utcnow()
-        
-        # Update user in database
-        if update_data:
-            await db_module.db.users.update_one({"id": user_id}, {"$set": update_data})
-            logger.info(f"User profile updated for user_id: {user_id}")
-        
-        # Get updated user data
-        updated_user = await db_module.db.users.find_one({"id": user_id})
-        
-        # Get organization membership and role
-        membership = await db_module.db.organization_memberships.find_one({"user_id": user_id})
-        org_id = membership.get("org_id")
-        role = membership.get("role")
-        
-        # Get organization details
-        org = await db_module.db.organizations.find_one({"id": org_id})
-        org = clean_mongo_doc(org)
-        org_name = org.get("name") if org else None
-        
-        # Return updated profile data
-        # aa =    { 
-        #     "profilePhoto": {
-        #         "firstName": updated_user.get("first_name", ""),
-        #         "lastName": updated_user.get("last_name", ""),
-        #         "email": updated_user.get("email", ""),
-        #         "role": role,
-        #         "status": "Active" if updated_user.get("is_active", True) else "Inactive",
-        #         "photoPath": updated_user.get("photo_path"),
-        #     }}
-        
-        profile_data = {
-            "personalDetails": {
-                "firstName": updated_user.get("first_name", ""),
-                "lastName": updated_user.get("last_name", ""),
-                "email": updated_user.get("email", ""),
-                "phone": updated_user.get("phone_number", ""),
-                "organization": org_name,
-                "location": updated_user.get("location", ""),
-                "timezone": updated_user.get("timezone", "UTC"),
-                "dateFormat": updated_user.get("date_format", "MM/DD/YYYY"),
-            },
+        user_data = await db_module.db.users.find_one({"id": user_id})
+        print("user_data------------------> ", user_data)
 
-            "profileDetails": {
-                "email": user_data.get("email", ""),
-                "role": role,
-                "status": "Active" if user_data.get("is_active", True) else "Inactive",
-            }
-        }
 
-        print()
-        print("profile data after update:", profile_data)
+        # updating user details information in user model
+        # usr = await DB.users.find_one({"email": payload["email"]},{"_id": 0})
+        # print("usr------------------> ", usr)
+        # print("usr[id]------------------> ", usr["id"])
 
+        update_user = {}
+        update_user_prof = {}
+        # if "personalDetails" in payload:
+        if payload:
+            print("payload found")
+            print("payload----->>>>> ", payload)
+            print("payload[firstName]----->>>>> ", payload["firstName"])
+            print("payload[organization]----->>>>> ", payload["organization"])
+            # full_name = user_data.get("full_name")
+            # parts = full_name.strip().split()
+            # first_name = parts[0] if parts else ""
+            # last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
+
+            if "firstName" in payload and "lastName" in payload:
+                full_name = f"{payload['firstName']} {payload['lastName']}"
+                update_user["full_name"] = full_name
+
+            # if "email" in payload:
+            #     update_user["email"] = payload["email"]
+            
+            if "phoneNumber" in payload["phoneNumber"]:
+                update_user_prof["phoneNumber"] = payload["phoneNumber"]
+            
+            if "location" in payload:
+                update_user_prof["location"] = payload["location"]
+
+            if "timezone" in payload:
+                update_user_prof["timezone"] = payload["timezone"]
+                # update_data["updated_at"] = datetime.utcnow()
+
+            if "dateFormat" in payload:
+                update_user_prof["dateFormat"] = payload["dateFormat"]
+
+            print("update_user---> ", update_user)
+            await DB.users.update_one({"id": user_id}, {"$set": update_user})
+            await DB.user_profiles.update_one({"user_id": user_id}, {"$set": update_user_prof})
+
+
+            # Update organization membership
+            org_update = {}            
+            if "organization" in payload["organization"]: 
+                org_update["organization"] = payload["organization"]
+            print("org_update---> ", org_update)
+
+            # Get organization membership and role            
+            membership = await db_module.db.organization_memberships.find_one({"user_id": user_id})
+            # org = await db_module.db.organizations.find_one({"id": membership.get("org_id")})
+
+            await DB.organizations.update_one({"id": membership.get("org_id")}, {"$set": org_update})
+        
+            # Update profile photo
+            # if "photoPath" in payload:
+                # update_data["photo_path"] = payload["photoPath"]
+        
         logger.info(f"User profile updated successfully for user_id: {user_id}")
-        return profile_data
+        return {"success":"User profile updated successfully"}
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to update user profile: {e}")
         raise HTTPException(status_code=500, detail="Failed to update user profile")
+
+
+# GET API to retrieve the user's profile picture path
+@router.get("/profile-pic", response_model=Dict[str, Any])
+async def get_profile_pic():
+    """
+    Get the profile picture path for the user.
+    """
+    try:
+        user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4"  # TODO: Replace with Depends(get_current_user)
+        user_prof_data = await db_module.db.user_profiles.find_one({"user_id": user_id})
+        if not user_prof_data or not user_prof_data.get("profile_pic_path"):
+            logger.warning(f"Profile picture not found for user_id: {user_id}")
+            raise HTTPException(status_code=404, detail="Profile picture not found")
+        return {"profile_pic_path": user_prof_data["profile_pic_path"]}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to fetch profile picture: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch profile picture")
+    
+
+# @router.patch("/upload-profile-pic", response_model=Dict[str, Any])
+# async def update_user_profile(payload: Dict[str, Any]):
+@router.post("/upload-profile-pic", response_model=Dict[str, Any]) # TODO: Replace with Depends(get_current_user)
+async def upload_profile_pic(file: UploadFile = File(...)): 
+    """
+    Upload a profile picture for the user. Stores file and updates user profile_pic_path in MongoDB.
+
+    Update user profile information including:
+    - Personal Information (first name, last name, phone)
+    - Location
+    - Timezone
+    - Date Format
+    - Profile Photo
+    """
+    try:
+        user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
+    
+        # Get user details
+        user_prof_data = await db_module.db.user_profiles.find_one({"user_id": user_id})
+        
+        if not user_prof_data:
+            logger.warning(f"User not found: {user_id}")
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        user_prof_data = await db_module.db.user_profiles.find_one({"user_id": user_id})
+        print("user_prof_data------------------> ", user_prof_data)
+
+        # Save uploaded file to disk (or cloud storage)
+        upload_dir = "uploaded_profile_pics"
+        os.makedirs(upload_dir, exist_ok=True)
+        filename = f"{user_id}_{int(datetime.utcnow().timestamp())}_{file.filename}"
+        file_path = os.path.join(upload_dir, filename)
+
+        with open(file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+
+        # Update user profile_pic_path in MongoDB
+        await DB.user_profiles.update_one({"user_id": user_id}, {"$set": {"profile_pic_path": file_path, "updated_at": datetime.utcnow()}})
+        logger.info(f"Profile picture uploaded for user_id: {user_id}, path: {file_path}")
+        return {"success": True, "profile_pic_path": file_path}
+    except Exception as e:
+        logger.error(f"Failed to upload profile picture: {e}")
+        raise HTTPException(status_code=500, detail="Failed to upload profile picture")
+    
