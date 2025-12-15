@@ -16,8 +16,8 @@ class Settings(BaseSettings):
     # JWT
     JWT_SECRET: str = Field("cc50ec6192f5f20c2931a99dd3ab22625df90527af1b56fc2d5516dff3c43e6b", env="JWT_SECRET")
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 1
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
     # Password reset token expiry (minutes)
     RESET_TOKEN_EXPIRE_MINUTES: int = 30

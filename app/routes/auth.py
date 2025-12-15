@@ -126,6 +126,7 @@ async def register(payload: RegisterRequest) -> Any:
 @router.post("/login", response_model=TokenResponse)
 async def login(payload: LoginRequest) -> Any:
     user = await _get_user_by_email(payload.email)
+    print("user logged in -----> ", user)
     if not user or not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
@@ -152,7 +153,7 @@ async def login(payload: LoginRequest) -> Any:
     }
     await db_module.db.refresh_tokens.insert_one(refresh_doc)
 
-    expires_in = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    expires_in = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 30
     # org_details = OrganizationMembership.find_one({"email": user["email"]})
 
     user_id = user.get("id")

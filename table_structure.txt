@@ -1,0 +1,2887 @@
+EOB Database Design – PostgreSQL & MongoDB 
+
+This document describes the relational (PostgreSQL) and document (MongoDB) data model for the EOB application, including tables/collections, columns/fields, data types, and key relationships. 
+
+1. PostgreSQL Tables 
+
+ORGANIZATIONS 
+
+Tenant / customer master table. 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+id 
+
+UUID 
+
+PK 
+
+NO 
+
+Unique identifier of the organization. 
+
+name 
+
+TEXT 
+
+ 
+
+NO 
+
+Display name of the organization. 
+
+status 
+
+TEXT 
+
+ 
+
+NO 
+
+Status: active, suspended, trial, closed. 
+
+settings_json 
+
+JSONB 
+
+ 
+
+YES 
+
+Organization-level configuration and defaults. 
+
+created_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Record creation timestamp. 
+
+updated_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Record last update timestamp. 
+
+Relationships: 
+
+- ORGANIZATIONS 1 — * ORGANIZATION_MEMBERSHIPS 
+
+- ORGANIZATIONS 1 — * PAYERS 
+
+- ORGANIZATIONS 1 — * TEMPLATES 
+
+- ORGANIZATIONS 1 — * UPLOAD_BATCHES 
+
+- ORGANIZATIONS 1 — * UPLOAD_FILES 
+
+- ORGANIZATIONS 1 — * PAYMENTS 
+
+- ORGANIZATIONS 1 — * RETENTION_POLICIES 
+
+ 
+
+USERS 
+
+Application user accounts. 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+id 
+
+UUID 
+
+PK 
+
+NO 
+
+Unique identifier of the user. 
+
+email 
+
+CITEXT 
+
+UNIQUE 
+
+NO 
+
+User email address (login). 
+
+password_hash 
+
+TEXT 
+
+ 
+
+NO 
+
+Password hash. 
+
+full_name 
+
+TEXT 
+
+ 
+
+NO 
+
+User full name. 
+
+is_active 
+
+BOOLEAN 
+
+ 
+
+NO 
+
+Whether the user is active. 
+
+last_login_at 
+
+TIMESTAMPTZ 
+
+ 
+
+YES 
+
+Last login timestamp. 
+
+created_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Record creation timestamp. 
+
+updated_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Record last update timestamp. 
+
+Relationships: 
+
+- USERS 1 — * ORGANIZATION_MEMBERSHIPS 
+
+- USERS 1 — * UPLOAD_BATCHES (uploaded_by) 
+
+- USERS 1 — * UPLOAD_FILES (uploaded_by) 
+
+- USERS 1 — * TEMPLATE_VERSIONS (created_by) 
+
+- USERS 1 — * REVIEW_SESSIONS 
+
+- USERS 1 — * REVIEW_COMMENTS (created_by) 
+
+- USERS 1 — * CLAIM_WORK_ITEMS (assigned_to) 
+
+- USERS 1 — * PROCESSING_EXCEPTIONS (resolved_by) 
+
+- USERS 1 — * EXPORTS_835 (generated_by) 
+
+ 
+
+ORGANIZATION_MEMBERSHIPS 
+
+Connects USERS to ORGANIZATIONS with a role. 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+id 
+
+UUID 
+
+PK 
+
+NO 
+
+Unique identifier of the membership. 
+
+org_id 
+
+UUID 
+
+FK → ORGANIZATIONS.id 
+
+NO 
+
+Organization ID. 
+
+user_id 
+
+UUID 
+
+FK → USERS.id 
+
+NO 
+
+User ID. 
+
+role 
+
+TEXT 
+
+ 
+
+NO 
+
+Role within the org: admin, reviewer, viewer. 
+
+created_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Record creation timestamp. 
+
+Relationships: 
+
+- Many-to-1 to ORGANIZATIONS via org_id 
+
+- Many-to-1 to USERS via user_id 
+
+ 
+
+PAYERS 
+
+Payer master (insurance companies / TPAs etc.). 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+id 
+
+UUID 
+
+PK 
+
+NO 
+
+Unique payer identifier. 
+
+org_id 
+
+UUID 
+
+FK → ORGANIZATIONS.id 
+
+NO 
+
+Owning organization. 
+
+name 
+
+TEXT 
+
+ 
+
+NO 
+
+Friendly payer name. 
+
+payer_code 
+
+TEXT 
+
+ 
+
+YES 
+
+Internal or external payer code. 
+
+default_template_id 
+
+UUID 
+
+FK → TEMPLATES.id 
+
+YES 
+
+Default template for this payer. 
+
+ai_detection_metadata 
+
+JSONB 
+
+ 
+
+YES 
+
+Patterns and hints for AI payer detection. 
+
+created_by 
+
+UUID 
+
+FK → USERS.id 
+
+YES 
+
+User who created the payer record. 
+
+created_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Creation timestamp. 
+
+updated_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Last update timestamp. 
+
+Relationships: 
+
+- PAYERS 1 — * PAYER_ALIASES 
+
+- PAYERS 1 — * TEMPLATES 
+
+- PAYERS 1 — * PAYMENTS 
+
+- PAYERS 1 — * UPLOAD_FILES (detected_payer_id) 
+
+ 
+
+PAYER_ALIASES 
+
+Alternate names/patterns used to match files to payers. 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+id 
+
+UUID 
+
+PK 
+
+NO 
+
+Unique identifier of the alias. 
+
+payer_id 
+
+UUID 
+
+FK → PAYERS.id 
+
+NO 
+
+Linked payer. 
+
+alias_text 
+
+TEXT 
+
+ 
+
+NO 
+
+Alias text / keyword / name variation. 
+
+match_type 
+
+TEXT 
+
+ 
+
+NO 
+
+Match method: exact, contains, regex. 
+
+priority 
+
+INT 
+
+ 
+
+NO 
+
+Priority when matching multiple aliases. 
+
+created_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Creation timestamp. 
+
+Relationships: 
+
+- Many-to-1 to PAYERS via payer_id 
+
+ 
+
+TEMPLATES 
+
+Logical templates per payer (EOB/835/other). 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+id 
+
+UUID 
+
+PK 
+
+NO 
+
+Unique template identifier. 
+
+org_id 
+
+UUID 
+
+FK → ORGANIZATIONS.id 
+
+NO 
+
+Owning organization. 
+
+payer_id 
+
+UUID 
+
+FK → PAYERS.id 
+
+NO 
+
+Payer this template belongs to. 
+
+name 
+
+TEXT 
+
+ 
+
+NO 
+
+Template name. 
+
+type 
+
+TEXT 
+
+ 
+
+NO 
+
+Template type: eob, 835, other. 
+
+status 
+
+TEXT 
+
+ 
+
+NO 
+
+Status: active, inactive. 
+
+current_version_id 
+
+UUID 
+
+FK → TEMPLATE_VERSIONS.id 
+
+YES 
+
+Current active version. 
+
+created_by 
+
+UUID 
+
+FK → USERS.id 
+
+NO 
+
+Creator user. 
+
+created_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Creation timestamp. 
+
+updated_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Last update timestamp. 
+
+Relationships: 
+
+- TEMPLATES 1 — * TEMPLATE_VERSIONS 
+
+- TEMPLATES 1 — * TEMPLATE_SAMPLES 
+
+- Many-to-1 to PAYERS via payer_id 
+
+- Many-to-1 to ORGANIZATIONS via org_id 
+
+ 
+
+TEMPLATE_VERSIONS 
+
+Version history for templates, pointing into Mongo layout. 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+id 
+
+UUID 
+
+PK 
+
+NO 
+
+Unique template version identifier. 
+
+template_id 
+
+UUID 
+
+FK → TEMPLATES.id 
+
+NO 
+
+Base template. 
+
+version_number 
+
+INT 
+
+ 
+
+NO 
+
+Sequential version number. 
+
+status 
+
+TEXT 
+
+ 
+
+NO 
+
+draft, active, retired. 
+
+ai_generated 
+
+BOOLEAN 
+
+ 
+
+NO 
+
+True if generated by AI. 
+
+ai_model_name 
+
+TEXT 
+
+ 
+
+YES 
+
+Model used to generate this version. 
+
+mongo_doc_id 
+
+TEXT 
+
+ 
+
+NO 
+
+Reference to payer_templates._id in Mongo. 
+
+notes 
+
+TEXT 
+
+ 
+
+YES 
+
+Notes, comments, change description. 
+
+created_by 
+
+UUID 
+
+FK → USERS.id 
+
+NO 
+
+User who created this version. 
+
+created_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Creation timestamp. 
+
+Relationships: 
+
+- Many-to-1 to TEMPLATES via template_id 
+
+- Referenced by TEMPLATES.current_version_id 
+
+- Referenced by UPLOAD_FILES.detected_template_version_id 
+
+- Referenced by TEMPLATE_SAMPLES.template_version_id 
+
+- Referenced by EXTRACTION_RESULTS.template_version_id 
+
+ 
+
+UPLOAD_FILES 
+
+Individual uploaded files (PDF/image/text) and AI detection metadata. 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+id 
+
+UUID 
+
+PK 
+
+NO 
+
+Unique file identifier. 
+
+org_id 
+
+UUID 
+
+FK → ORGANIZATIONS.id 
+
+NO 
+
+Owning organization. 
+
+batch_id 
+
+UUID 
+
+FK → UPLOAD_BATCHES.id 
+
+YES 
+
+Upload batch identifier. 
+
+original_filename 
+
+TEXT 
+
+ 
+
+NO 
+
+Original uploaded file name. 
+
+storage_path 
+
+TEXT 
+
+ 
+
+NO 
+
+Path/location in storage. 
+
+mime_type 
+
+TEXT 
+
+ 
+
+NO 
+
+MIME type of the file. 
+
+file_size 
+
+BIGINT 
+
+ 
+
+YES 
+
+File size in bytes. 
+
+hash 
+
+TEXT 
+
+ 
+
+YES 
+
+Optional checksum/hash. 
+
+page_count 
+
+INT 
+
+ 
+
+YES 
+
+Number of pages. 
+
+upload_source 
+
+TEXT 
+
+ 
+
+NO 
+
+Source: manual, api, integration. 
+
+uploaded_by 
+
+UUID 
+
+FK → USERS.id 
+
+YES 
+
+User who uploaded the file. 
+
+uploaded_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Upload timestamp. 
+
+detected_payer_id 
+
+UUID 
+
+FK → PAYERS.id 
+
+YES 
+
+AI-detected payer. 
+
+detected_template_version_id 
+
+UUID 
+
+FK → TEMPLATE_VERSIONS.id 
+
+YES 
+
+AI-detected template version. 
+
+ai_payer_confidence 
+
+NUMERIC 
+
+ 
+
+YES 
+
+Confidence for payer detection. 
+
+ai_template_confidence 
+
+NUMERIC 
+
+ 
+
+YES 
+
+Confidence for template detection. 
+
+processing_status 
+
+TEXT 
+
+ 
+
+NO 
+
+uploaded, ocr_in_progress, extracted, in_review, completed, failed. 
+
+processing_error_message 
+
+TEXT 
+
+ 
+
+YES 
+
+Last error during processing. 
+
+is_test_file 
+
+BOOLEAN 
+
+ 
+
+NO 
+
+Whether this is a test file. 
+
+Relationships: 
+
+- UPLOAD_FILES 1 — * FILE_PROCESSING_RUNS 
+
+- UPLOAD_FILES 1 — * OCR_RESULTS 
+
+- UPLOAD_FILES 1 — * EXTRACTION_RESULTS 
+
+- UPLOAD_FILES 1 — * PAYMENTS 
+
+- UPLOAD_FILES 1 — * CLAIMS 
+
+- UPLOAD_FILES 1 — * PROCESSING_EXCEPTIONS 
+
+ 
+
+OCR_RESULTS 
+
+Metadata and pointer to OCR output stored in Mongo. 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+id 
+
+UUID 
+
+PK 
+
+NO 
+
+Unique OCR result identifier. 
+
+file_id 
+
+UUID 
+
+FK → UPLOAD_FILES.id 
+
+NO 
+
+Associated file. 
+
+engine 
+
+TEXT 
+
+ 
+
+NO 
+
+OCR engine used. 
+
+language 
+
+TEXT 
+
+ 
+
+YES 
+
+Detected language. 
+
+mongo_doc_id 
+
+TEXT 
+
+ 
+
+NO 
+
+Reference to ocr_results._id in Mongo. 
+
+avg_confidence 
+
+NUMERIC 
+
+ 
+
+YES 
+
+Average confidence score. 
+
+created_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Creation timestamp. 
+
+Relationships: 
+
+- Many-to-1 to UPLOAD_FILES via file_id 
+
+- OCR_RESULTS 1 — * EXTRACTION_RESULTS 
+
+ 
+
+EXTRACTION_RESULTS 
+
+Metadata and pointer to AI extraction results stored in Mongo. 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+id 
+
+UUID 
+
+PK 
+
+NO 
+
+Unique extraction result ID. 
+
+file_id 
+
+UUID 
+
+FK → UPLOAD_FILES.id 
+
+NO 
+
+Associated file. 
+
+template_version_id 
+
+UUID 
+
+FK → TEMPLATE_VERSIONS.id 
+
+YES 
+
+Template used for extraction. 
+
+ocr_result_id 
+
+UUID 
+
+FK → OCR_RESULTS.id 
+
+NO 
+
+Linked OCR result. 
+
+mongo_doc_id 
+
+TEXT 
+
+ 
+
+NO 
+
+Reference to extraction_results._id in Mongo. 
+
+ai_model_name 
+
+TEXT 
+
+ 
+
+YES 
+
+Model used for extraction. 
+
+ai_overall_confidence 
+
+NUMERIC 
+
+ 
+
+YES 
+
+Overall AI confidence score. 
+
+created_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Creation timestamp. 
+
+Relationships: 
+
+- Many-to-1 to UPLOAD_FILES via file_id 
+
+- Many-to-1 to OCR_RESULTS via ocr_result_id 
+
+- Many-to-1 to TEMPLATE_VERSIONS via template_version_id 
+
+ 
+
+PAYMENTS 
+
+Payment-level records (check/EFT). 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+id 
+
+UUID 
+
+PK 
+
+NO 
+
+Unique payment identifier. 
+
+org_id 
+
+UUID 
+
+FK → ORGANIZATIONS.id 
+
+NO 
+
+Owning organization. 
+
+file_id 
+
+UUID 
+
+FK → UPLOAD_FILES.id 
+
+YES 
+
+Source file. 
+
+payer_id 
+
+UUID 
+
+FK → PAYERS.id 
+
+NO 
+
+Payer associated with this payment. 
+
+payment_reference 
+
+TEXT 
+
+ 
+
+NO 
+
+Check number / EFT reference. 
+
+payment_date 
+
+DATE 
+
+ 
+
+NO 
+
+Payment date. 
+
+payment_amount 
+
+NUMERIC 
+
+ 
+
+NO 
+
+Total payment amount. 
+
+currency 
+
+TEXT 
+
+ 
+
+NO 
+
+Payment currency (e.g., USD). 
+
+remit_number 
+
+TEXT 
+
+ 
+
+YES 
+
+Remittance or remit advice number. 
+
+status 
+
+TEXT 
+
+ 
+
+NO 
+
+extracted, in_review, approved, exported. 
+
+created_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Record creation timestamp. 
+
+updated_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Record last update timestamp. 
+
+Relationships: 
+
+- PAYMENTS 1 — * CLAIMS 
+
+- PAYMENTS 1 — * EXPORT_ITEMS 
+
+- Many-to-1 to PAYERS via payer_id 
+
+- Many-to-1 to ORGANIZATIONS via org_id 
+
+ 
+
+CLAIMS 
+
+Claim-level data (CLP-level) under each payment. 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+id 
+
+UUID 
+
+PK 
+
+NO 
+
+Unique claim identifier. 
+
+payment_id 
+
+UUID 
+
+FK → PAYMENTS.id 
+
+NO 
+
+Parent payment. 
+
+file_id 
+
+UUID 
+
+FK → UPLOAD_FILES.id 
+
+YES 
+
+Source file. 
+
+claim_number 
+
+TEXT 
+
+ 
+
+NO 
+
+Claim reference number. 
+
+patient_name 
+
+TEXT 
+
+ 
+
+YES 
+
+Patient name. 
+
+member_id 
+
+TEXT 
+
+ 
+
+YES 
+
+Member or insured ID. 
+
+provider_name 
+
+TEXT 
+
+ 
+
+YES 
+
+Rendering or billing provider name. 
+
+total_billed_amount 
+
+NUMERIC 
+
+ 
+
+NO 
+
+Total billed amount. 
+
+total_allowed_amount 
+
+NUMERIC 
+
+ 
+
+YES 
+
+Total allowed amount. 
+
+total_paid_amount 
+
+NUMERIC 
+
+ 
+
+NO 
+
+Total paid amount. 
+
+total_adjustment_amount 
+
+NUMERIC 
+
+ 
+
+YES 
+
+Total adjustments. 
+
+claim_status_code 
+
+TEXT 
+
+ 
+
+YES 
+
+Status code for the claim. 
+
+service_date_from 
+
+DATE 
+
+ 
+
+YES 
+
+Service start date. 
+
+service_date_to 
+
+DATE 
+
+ 
+
+YES 
+
+Service end date. 
+
+validation_score 
+
+NUMERIC 
+
+ 
+
+YES 
+
+Validation score or quality score. 
+
+status 
+
+TEXT 
+
+ 
+
+NO 
+
+extracted, in_review, approved, exported. 
+
+created_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Record creation timestamp. 
+
+updated_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Record last update timestamp. 
+
+Relationships: 
+
+- CLAIMS 1 — * SERVICE_LINES 
+
+- CLAIMS 1 — * ADJUSTMENTS 
+
+- CLAIMS 1 — * CLAIM_VERSIONS 
+
+- CLAIMS 1 — * VALIDATION_RESULTS 
+
+- CLAIMS 1 — * CLAIM_WORK_ITEMS 
+
+- CLAIMS 1 — * PROCESSING_EXCEPTIONS 
+
+- CLAIMS 1 — * EXPORT_ITEMS 
+
+ 
+
+SERVICE_LINES 
+
+Per-service line items under a claim. 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+id 
+
+UUID 
+
+PK 
+
+NO 
+
+Unique service line identifier. 
+
+claim_id 
+
+UUID 
+
+FK → CLAIMS.id 
+
+NO 
+
+Parent claim. 
+
+line_number 
+
+INT 
+
+ 
+
+NO 
+
+Line number as shown on the EOB. 
+
+cpt_code 
+
+TEXT 
+
+ 
+
+YES 
+
+CPT or procedure code. 
+
+modifier1 
+
+TEXT 
+
+ 
+
+YES 
+
+First modifier. 
+
+modifier2 
+
+TEXT 
+
+ 
+
+YES 
+
+Second modifier. 
+
+dos_from 
+
+DATE 
+
+ 
+
+YES 
+
+Date of service from. 
+
+dos_to 
+
+DATE 
+
+ 
+
+YES 
+
+Date of service to. 
+
+billed_amount 
+
+NUMERIC 
+
+ 
+
+NO 
+
+Billed amount for this line. 
+
+allowed_amount 
+
+NUMERIC 
+
+ 
+
+YES 
+
+Allowed amount for this line. 
+
+paid_amount 
+
+NUMERIC 
+
+ 
+
+NO 
+
+Paid amount for this line. 
+
+units 
+
+NUMERIC 
+
+ 
+
+YES 
+
+Units or quantity. 
+
+created_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Record creation timestamp. 
+
+updated_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Record last update timestamp. 
+
+Relationships: 
+
+- Many-to-1 to CLAIMS via claim_id 
+
+- SERVICE_LINES 1 — * ADJUSTMENTS 
+
+ 
+
+ADJUSTMENTS 
+
+Adjustments at claim or service-line level. 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+id 
+
+UUID 
+
+PK 
+
+NO 
+
+Unique adjustment identifier. 
+
+claim_id 
+
+UUID 
+
+FK → CLAIMS.id 
+
+YES 
+
+Parent claim (if header-level). 
+
+service_line_id 
+
+UUID 
+
+FK → SERVICE_LINES.id 
+
+YES 
+
+Parent service line (if line-level). 
+
+carc_code 
+
+TEXT 
+
+FK → CARC_CODES.code 
+
+YES 
+
+CARC adjustment reason code. 
+
+amount 
+
+NUMERIC 
+
+ 
+
+NO 
+
+Adjustment amount. 
+
+quantity 
+
+NUMERIC 
+
+ 
+
+YES 
+
+Quantity associated with adjustment. 
+
+created_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Record creation timestamp. 
+
+Relationships: 
+
+- Many-to-1 to CLAIMS via claim_id 
+
+- Many-to-1 to SERVICE_LINES via service_line_id 
+
+- Many-to-1 to CARC_CODES via carc_code 
+
+ 
+
+CARC_CODES 
+
+Master list of CARC (Claim Adjustment Reason Codes). 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+code 
+
+TEXT 
+
+PK 
+
+NO 
+
+CARC code. 
+
+description 
+
+TEXT 
+
+ 
+
+NO 
+
+Description of the code. 
+
+Relationships: 
+
+- CARC_CODES 1 — * ADJUSTMENTS 
+
+ 
+
+REMARK_CODES 
+
+Master list of remark codes. 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+code 
+
+TEXT 
+
+PK 
+
+NO 
+
+Remark code. 
+
+description 
+
+TEXT 
+
+ 
+
+NO 
+
+Description of the remark code. 
+
+Relationships: 
+
+- REMARK_CODES 1 — * CLAIM_REMARK_CODES 
+
+ 
+
+CLAIM_REMARK_CODES 
+
+Junction table between CLAIMS and REMARK_CODES. 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+id 
+
+UUID 
+
+PK 
+
+NO 
+
+Unique identifier. 
+
+claim_id 
+
+UUID 
+
+FK → CLAIMS.id 
+
+NO 
+
+Associated claim. 
+
+remark_code 
+
+TEXT 
+
+FK → REMARK_CODES.code 
+
+NO 
+
+Remark code. 
+
+Relationships: 
+
+- Many-to-1 to CLAIMS via claim_id 
+
+- Many-to-1 to REMARK_CODES via remark_code 
+
+ 
+
+VALIDATION_RESULTS 
+
+Overall validation result per claim/file. 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+id 
+
+UUID 
+
+PK 
+
+NO 
+
+Unique validation result identifier. 
+
+claim_id 
+
+UUID 
+
+FK → CLAIMS.id 
+
+YES 
+
+Claim being validated. 
+
+file_id 
+
+UUID 
+
+FK → UPLOAD_FILES.id 
+
+YES 
+
+File being validated. 
+
+status 
+
+TEXT 
+
+ 
+
+NO 
+
+passed, failed, warning. 
+
+summary 
+
+TEXT 
+
+ 
+
+YES 
+
+High-level validation summary. 
+
+created_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Creation timestamp. 
+
+Relationships: 
+
+- VALIDATION_RESULTS 1 — * FIELD_VALIDATIONS 
+
+- Many-to-1 to CLAIMS via claim_id 
+
+- Many-to-1 to UPLOAD_FILES via file_id 
+
+ 
+
+FIELD_VALIDATIONS 
+
+Field-level validation issues. 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+id 
+
+UUID 
+
+PK 
+
+NO 
+
+Unique identifier. 
+
+validation_result_id 
+
+UUID 
+
+FK → VALIDATION_RESULTS.id 
+
+NO 
+
+Parent validation result. 
+
+entity_type 
+
+TEXT 
+
+ 
+
+NO 
+
+file, claim, service_line, payment. 
+
+entity_id 
+
+UUID 
+
+ 
+
+NO 
+
+ID of the entity in its table. 
+
+field_name 
+
+TEXT 
+
+ 
+
+NO 
+
+Field being validated (e.g., total_paid_amount). 
+
+severity 
+
+TEXT 
+
+ 
+
+NO 
+
+error, warning, info. 
+
+message 
+
+TEXT 
+
+ 
+
+NO 
+
+Validation message. 
+
+created_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Creation timestamp. 
+
+Relationships: 
+
+- Many-to-1 to VALIDATION_RESULTS via validation_result_id 
+
+ 
+
+CLAIM_WORK_ITEMS 
+
+Work queue items for reviewers (My Worklist). 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+id 
+
+UUID 
+
+PK 
+
+NO 
+
+Unique work item ID. 
+
+claim_id 
+
+UUID 
+
+FK → CLAIMS.id 
+
+NO 
+
+Associated claim. 
+
+assigned_to 
+
+UUID 
+
+FK → USERS.id 
+
+YES 
+
+Assigned reviewer. 
+
+status 
+
+TEXT 
+
+ 
+
+NO 
+
+open, in_progress, on_hold, completed. 
+
+priority 
+
+INT 
+
+ 
+
+NO 
+
+Priority (higher = more urgent). 
+
+due_at 
+
+TIMESTAMPTZ 
+
+ 
+
+YES 
+
+Optional due date/time. 
+
+created_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Creation timestamp. 
+
+updated_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Update timestamp. 
+
+Relationships: 
+
+- Many-to-1 to CLAIMS via claim_id 
+
+- Many-to-1 to USERS via assigned_to 
+
+ 
+
+PROCESSING_EXCEPTIONS 
+
+Exceptions raised during each processing step. 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+id 
+
+UUID 
+
+PK 
+
+NO 
+
+Unique exception identifier. 
+
+file_id 
+
+UUID 
+
+FK → UPLOAD_FILES.id 
+
+YES 
+
+Impacted file. 
+
+claim_id 
+
+UUID 
+
+FK → CLAIMS.id 
+
+YES 
+
+Impacted claim (if applicable). 
+
+step 
+
+TEXT 
+
+ 
+
+NO 
+
+upload, ocr, extraction, validation, export. 
+
+severity 
+
+TEXT 
+
+ 
+
+NO 
+
+error, warning. 
+
+code 
+
+TEXT 
+
+ 
+
+NO 
+
+Exception code. 
+
+message 
+
+TEXT 
+
+ 
+
+NO 
+
+Human-readable message. 
+
+details_json 
+
+JSONB 
+
+ 
+
+YES 
+
+Structured details of the exception. 
+
+status 
+
+TEXT 
+
+ 
+
+NO 
+
+open, resolved, ignored. 
+
+created_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Creation timestamp. 
+
+resolved_at 
+
+TIMESTAMPTZ 
+
+ 
+
+YES 
+
+Resolution timestamp. 
+
+resolved_by 
+
+UUID 
+
+FK → USERS.id 
+
+YES 
+
+User who resolved the exception. 
+
+Relationships: 
+
+- Many-to-1 to UPLOAD_FILES via file_id 
+
+- Many-to-1 to CLAIMS via claim_id 
+
+- Many-to-1 to USERS via resolved_by 
+
+ 
+
+EXPORTS_835 
+
+Generated 835 export files. 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+id 
+
+UUID 
+
+PK 
+
+NO 
+
+Unique export identifier. 
+
+org_id 
+
+UUID 
+
+FK → ORGANIZATIONS.id 
+
+NO 
+
+Owning organization. 
+
+export_reference 
+
+TEXT 
+
+ 
+
+NO 
+
+External or internal export reference ID. 
+
+storage_path 
+
+TEXT 
+
+ 
+
+NO 
+
+Export file storage path. 
+
+status 
+
+TEXT 
+
+ 
+
+NO 
+
+pending, generated, downloaded, failed. 
+
+generated_by 
+
+UUID 
+
+FK → USERS.id 
+
+YES 
+
+User who generated the export. 
+
+generated_at 
+
+TIMESTAMPTZ 
+
+ 
+
+YES 
+
+Generation timestamp. 
+
+error_message 
+
+TEXT 
+
+ 
+
+YES 
+
+Error details when failed. 
+
+Relationships: 
+
+- EXPORTS_835 1 — * EXPORT_ITEMS 
+
+- EXPORTS_835 1 — * EXPORT_AUDIT_LOGS 
+
+- Many-to-1 to ORGANIZATIONS via org_id 
+
+- Many-to-1 to USERS via generated_by 
+
+ 
+
+EXPORT_ITEMS 
+
+Links between exports and included payments/claims. 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+id 
+
+UUID 
+
+PK 
+
+NO 
+
+Unique link identifier. 
+
+export_id 
+
+UUID 
+
+FK → EXPORTS_835.id 
+
+NO 
+
+Export file reference. 
+
+payment_id 
+
+UUID 
+
+FK → PAYMENTS.id 
+
+YES 
+
+Payment that is part of the export. 
+
+claim_id 
+
+UUID 
+
+FK → CLAIMS.id 
+
+YES 
+
+Claim that is part of the export. 
+
+Relationships: 
+
+- Many-to-1 to EXPORTS_835 via export_id 
+
+- Many-to-1 to PAYMENTS via payment_id 
+
+- Many-to-1 to CLAIMS via claim_id 
+
+ 
+
+RETENTION_POLICIES 
+
+Retention periods per entity type for each organization. 
+
+Column 
+
+Type 
+
+Key 
+
+Nullable 
+
+Description 
+
+id 
+
+UUID 
+
+PK 
+
+NO 
+
+Unique retention policy identifier. 
+
+org_id 
+
+UUID 
+
+FK → ORGANIZATIONS.id 
+
+NO 
+
+Owning organization. 
+
+policy_name 
+
+TEXT 
+
+ 
+
+NO 
+
+Name of the retention policy. 
+
+entity_type 
+
+TEXT 
+
+ 
+
+NO 
+
+file, log, claim, export. 
+
+retention_days 
+
+INT 
+
+ 
+
+NO 
+
+Retention period in days. 
+
+is_active 
+
+BOOLEAN 
+
+ 
+
+NO 
+
+Whether policy is active. 
+
+created_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Creation timestamp. 
+
+updated_at 
+
+TIMESTAMPTZ 
+
+ 
+
+NO 
+
+Last update timestamp. 
+
+Relationships: 
+
+- Many-to-1 to ORGANIZATIONS via org_id 
+
+ 
+
+2. MongoDB Collections 
+
+payer_templates 
+
+Stores full template layout definitions and fields used by Template Builder and extraction engine. 
+
+Field 
+
+Type 
+
+Description 
+
+_id 
+
+string/ObjectId 
+
+Primary identifier; referenced by TEMPLATE_VERSIONS.mongo_doc_id. 
+
+orgId 
+
+string 
+
+References ORGANIZATIONS.id. 
+
+templateId 
+
+string 
+
+References TEMPLATES.id. 
+
+payerId 
+
+string 
+
+References PAYERS.id. 
+
+version 
+
+number 
+
+Version number matching TEMPLATE_VERSIONS.version_number. 
+
+status 
+
+string 
+
+DRAFT, ACTIVE, DEPRECATED. 
+
+name 
+
+string 
+
+Template name. 
+
+createdBy 
+
+string 
+
+User or 'ai' who created this template. 
+
+createdAt 
+
+datetime 
+
+Creation timestamp. 
+
+layout 
+
+object 
+
+Layout definition (pages, fields, tables, locators). 
+
+requiredFields 
+
+array[string] 
+
+Keys of required fields. 
+
+aiSummary 
+
+object 
+
+Overall AI confidence, missing fields, etc. 
+
+ 
+
+ocr_results 
+
+Stores raw OCR output and per-page layout for each uploaded file. 
+
+Field 
+
+Type 
+
+Description 
+
+_id 
+
+string/ObjectId 
+
+Primary identifier; referenced by OCR_RESULTS.mongo_doc_id. 
+
+fileId 
+
+string 
+
+References UPLOAD_FILES.id. 
+
+orgId 
+
+string 
+
+References ORGANIZATIONS.id. 
+
+engine 
+
+string 
+
+OCR engine used. 
+
+language 
+
+string 
+
+Detected language. 
+
+rawText 
+
+string 
+
+Full OCR text for the document. 
+
+pages 
+
+array[object] 
+
+Per-page text and block layout. 
+
+avgConfidence 
+
+number 
+
+Average OCR confidence across pages. 
+
+createdAt 
+
+datetime 
+
+Creation timestamp. 
+
+ 
+
+extraction_results 
+
+Stores AI extraction and normalized claims JSON for each file. 
+
+Field 
+
+Type 
+
+Description 
+
+_id 
+
+string/ObjectId 
+
+Primary identifier; referenced by EXTRACTION_RESULTS.mongo_doc_id. 
+
+fileId 
+
+string 
+
+References UPLOAD_FILES.id. 
+
+orgId 
+
+string 
+
+References ORGANIZATIONS.id. 
+
+templateVersionId 
+
+string 
+
+References TEMPLATE_VERSIONS.id. 
+
+ocrResultId 
+
+string 
+
+References ocr_results._id. 
+
+modelName 
+
+string 
+
+AI model used for extraction. 
+
+overallConfidence 
+
+number 
+
+Overall confidence of the extraction. 
+
+rawExtracted 
+
+object 
+
+Unnormalized, raw extracted data. 
+
+normalizedClaims 
+
+object 
+
+Structured claims/payments representation used to populate SQL tables. 
+
+createdAt 
+
+datetime 
+
+Creation timestamp. 
+
+ 
+
+template_builder_sessions 
+
+Optional collection to store in-progress template drafts and editing sessions. 
+
+Field 
+
+Type 
+
+Description 
+
+_id 
+
+string/ObjectId 
+
+Primary identifier of the session. 
+
+orgId 
+
+string 
+
+References ORGANIZATIONS.id. 
+
+templateId 
+
+string 
+
+References TEMPLATES.id. 
+
+templateVersionId 
+
+string 
+
+References TEMPLATE_VERSIONS.id (draft). 
+
+userId 
+
+string 
+
+References USERS.id. 
+
+draftLayout 
+
+object 
+
+Draft template layout JSON. 
+
+status 
+
+string 
+
+DRAFT, PUBLISHED, DISCARDED. 
+
+createdAt 
+
+datetime 
+
+Creation timestamp. 
+
+updatedAt 
+
+datetime 
+
+Last update timestamp. 
+
+ 

@@ -25,9 +25,17 @@ from ..services.file_type_handler import (
     clean_extracted_text,
     SUPPORTED_MIME_TYPES
 )
+from app.services.template_db_service import get_pg_conn
+from pymongo import MongoClient
+import os
+from app.common.db.db import init_db
+
+
+DB = init_db() 
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/template", tags=["template"])
-logger = get_logger(__name__)
+
 
 @router.post("/upload", status_code=status.HTTP_200_OK)
 async def upload_template_file(file: UploadFile = File(...)) -> Dict[str, Any]:
@@ -78,10 +86,10 @@ async def upload_template_file(file: UploadFile = File(...)) -> Dict[str, Any]:
                 status_code=400, 
                 detail=f"Could not extract meaningful text from {file_extension} file. Processing method: {processing_strategy['method']}"
             )
-
+        print('raw_text=========', raw_text)
         # 5. Clean extracted text based on processing method
         cleaned_text = clean_extracted_text(raw_text, processing_strategy['method'])
-        
+        print('cleaned_text=========', cleaned_text)
         if not cleaned_text or len(cleaned_text.strip()) < 10:
             raise HTTPException(
                 status_code=400, 
@@ -96,7 +104,7 @@ async def upload_template_file(file: UploadFile = File(...)) -> Dict[str, Any]:
         # Final validation before AI processing
         try:
             # Test if the text can be safely encoded/decoded
-            test_json = json.dumps({"test": cleaned_text[:100]})
+            test_json = json.dumps({"test": cleaned_text[:5000]})
             logger.info("Text validation passed for AI processing")
         except (UnicodeDecodeError, UnicodeEncodeError, ValueError) as e:
             logger.error(f"Text encoding validation failed: {e}")
@@ -108,6 +116,7 @@ async def upload_template_file(file: UploadFile = File(...)) -> Dict[str, Any]:
         extraction_result = await process_template_with_dynamic_extraction(cleaned_text, file.filename)
         
         dynamic_keys = extraction_result.get("dynamic_keys", [])
+        print('dynamic_keys==========', dynamic_keys)
         json_result = extraction_result.get("extraction_data", {})
         
         # 7. Extract payer_id dynamically from JSON and create template in PostgreSQL
@@ -255,6 +264,57 @@ async def list_templates() -> Dict[str, Any]:
         from ..services.template_db_service import list_all_templates
         templates = list_all_templates()
         return {"templates": templates, "count": len(templates)}
+    except Exception as e:
+        logger.error(f"Error listing templates: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to list templates")
+    
+    
+@router.get("/template-listing", status_code=status.HTTP_200_OK)
+async def get_template_listing(org_id: str) -> Dict[str, Any]:
+    try:
+        # Connect to Postgres
+        conn = get_pg_conn()
+        cur = conn.cursor()
+
+        # Connect to MongoDB using init_db from db.py
+        
+        builder_collection = DB["template_builder_sessions"]
+
+        # 1. Get all templates for the org
+        cur.execute("""
+            SELECT t.id, t.name
+            FROM templates t
+            WHERE t.org_id = %s
+        """, (org_id,))
+        templates = cur.fetchall()
+
+        result = []
+        for template_id, template_name in templates:
+            # 2. Get latest version for this template
+            cur.execute("""
+                SELECT version_number FROM template_versions
+                WHERE template_id = %s
+                ORDER BY created_at DESC LIMIT 1
+            """, (template_id,))
+            version_row = cur.fetchone()
+            version = version_row[0] if version_row else None
+            print('template_id=====', template_id)
+            # 3. Get field mapping info and usage count from MongoDB (async)
+            builder_doc = await builder_collection.find_one({"template_id": str(template_id)})
+            total_field = builder_doc.get("total_field") if builder_doc else None
+            mapping_field = builder_doc.get("mapped_field") if builder_doc else None
+            usage_count = await builder_collection.count_documents({"template_id": str(template_id)})
+
+            result.append({
+                "template_id": template_id,
+                "template_name": template_name,
+                "version": version,
+                "field_mapped ": f"{mapping_field}/{total_field}" if total_field and mapping_field else "N/A",
+                "usage_count": usage_count
+            })
+        cur.close()
+        conn.close()
+        return {"message": "templates retrieved successfully", "templates": result}
     except Exception as e:
         logger.error(f"Error listing templates: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to list templates")

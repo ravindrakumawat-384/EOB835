@@ -42,6 +42,11 @@ async def read_general_settings(user: Dict[str, Any] = Depends(get_current_user)
         logger.info("Fetching general settings for user")        
         # user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
         # user_id = "b6ee4982-b5ec-425f-894d-4324adce0f36" #rv
+        print('user=====', user.get("id"))
+        print('user=====', user.get("id"))
+        print('user=====', user.get("id"))
+        print('user=====', user.get("id"))
+        print('user=====', user.get("id"))
         user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
 
 

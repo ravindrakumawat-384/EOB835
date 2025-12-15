@@ -84,70 +84,133 @@ async def process_template_with_dynamic_extraction(raw_text: str, filename: str)
             "raw_key_value_pairs": {}
         }
 
-def extract_dynamic_keys_from_text(raw_text: str) -> List[str]:
+
+def extract_dynamic_keys_from_text(raw_text: str) -> list:
     """
-    Use AI to dynamically identify all possible keys/fields from the text data.
-    Returns a list of keys that should be extracted based on the actual content.
+    Use AI to dynamically identify section-wise template fields
+    from a medical document for frontend template generation.
     """
+    print("Under extract_dynamic_keys_from_text")
+
     if not OPENAI_AVAILABLE or not OPENAI_API_KEY:
         return extract_keys_fallback(raw_text)
-    
+
     try:
-        # Clean text for AI processing
-        clean_text = raw_text.replace('\x00', '').replace('\r', '\n')
-        clean_text = clean_text.encode('utf-8', errors='ignore').decode('utf-8')
-        
+        # Clean text
+        clean_text = raw_text.replace("\x00", "").replace("\r", "\n")
+        clean_text = clean_text.encode("utf-8", errors="ignore").decode("utf-8")
+
         client = openai.OpenAI(api_key=OPENAI_API_KEY)
-        
+
         prompt = f"""
-        Analyze the following text and identify ALL possible data fields/keys that can be extracted from it.
-        
-        RULES:
-        1. Look for any structured data patterns (key-value pairs, labels, headings)
-        2. Identify financial/medical/business terms that represent extractable data
-        3. Find dates, amounts, names, IDs, codes, addresses, etc.
-        4. Return field names that would be suitable as JSON keys
-        5. Use snake_case format (e.g., "patient_name", "total_amount")
-        6. Be comprehensive - include ALL possible fields you can identify
-        
-        Text to analyze:
-        {clean_text[:3000]}
-        
-        Return ONLY a JSON array of field names, like this:
-        ["field1", "field2", "field3", ...]
-        
-        Do not include explanations, just the JSON array of field names.
+        You are a medical document section-aware extraction engine.
+
+        INPUT:
+        OCR text from ONE medical document (PDF/Image/DOC).
+
+        TASK:
+        Generate a SECTION-WISE TEMPLATE SCHEMA for frontend rendering.
+
+        RULES (STRICT):
+        1. Identify sections:
+        - File / Payment Information
+        - Claim Information
+        - Service Line Details
+        2. Extract ONLY field metadata (no values).
+        3. Preserve label meaning from the document.
+        4. Do NOT normalize across files.
+        5. Assign UI input type based on data nature.
+        6. Include confidence score (0–1).
+        7. Output VALID JSON only.
+
+        OUTPUT FORMAT (JSON ONLY):
+
+        {{
+        "sections": [
+            {{
+            "sectionName": "File / Payment Information",
+            "sectionOrder": 1,
+            "fields": [
+                {{
+                "field": "payer",
+                "label": "Payer",
+                "type": "inputText",
+                "fieldOrder": 1,
+                "confidence": 0.97
+                }}
+            ]
+            }},
+            {{
+            "sectionName": "Claim Information",
+            "sectionOrder": 2,
+            "fields": [
+                {{
+                "field": "patient_name",
+                "label": "Patient Name",
+                "type": "inputText",
+                "fieldOrder": 1,
+                "confidence": 0.98
+                }}
+            ]
+            }},
+            {{
+            "sectionName": "Service Line Details",
+            "sectionOrder": 3,
+            "fields": [
+                {{
+                "field": "line_control_number",
+                "label": "Line Control Number",
+                "type": "inputNumber",
+                "fieldOrder": 1,
+                "confidence": 0.97
+                }}
+            ]
+            }}
+        ]
+        }}
+
+        CONSTRAINTS:
+        - No explanations
+        - No markdown
+        - No trailing commas
+        - Valid JSON only
+
+        TEXT:
+        {clean_text[:5000]}
         """
-        
+
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5.1",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
             max_tokens=1000
         )
-        
+
         content = response.choices[0].message.content.strip()
-        
-        # Clean up response if it has markdown formatting
-        if content.startswith("```json"):
-            content = content[7:]
-        if content.endswith("```"):
-            content = content[:-3]
-        content = content.strip()
-        
-        # Parse the JSON array
-        keys = json.loads(content)
-        
-        if isinstance(keys, list):
-            logger.info(f"🔑 AI extracted {len(keys)} dynamic keys from text")
-            return keys
-        else:
-            logger.warning("AI returned invalid format, using fallback")
-            return extract_keys_fallback(raw_text)
-            
+
+        # Remove accidental markdown
+        if content.startswith("```"):
+            content = content.split("```")[1].strip()
+
+        data = json.loads(content)
+
+        if isinstance(data, dict) and "sections" in data:
+            return data["sections"]
+
+        logger.warning("Unexpected AI response structure")
+        return extract_keys_fallback(raw_text)
+
+    except json.JSONDecodeError as je:
+        logger.error(f"JSON decode error: {je}")
+        return extract_keys_fallback(raw_text)
+
     except Exception as e:
         logger.error(f"AI key extraction failed: {e}")
         return extract_keys_fallback(raw_text)
+
+
+
+
 
 def extract_keys_fallback(raw_text: str) -> List[str]:
     """
@@ -296,7 +359,7 @@ def convert_text_to_dynamic_json(raw_text: str, dynamic_keys: List[str], filenam
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
+            temperature=0.7,
             max_tokens=2000
         )
         
