@@ -69,31 +69,27 @@ async def dashboard_summary() -> JSONResponse:
         # File stats
         cur.execute("SELECT COUNT(*) FROM upload_files WHERE org_id = %s", (org_id,))
         pg_uploaded = cur.fetchone()[0]
-        # cur.execute("SELECT COUNT(*) FROM upload_files WHERE org_id = %s AND processing_status = 'completed'", (org_id,))
-        # pg_processed = cur.fetchone()[0]
+       
         cur.execute("""
             SELECT COUNT(*) 
             FROM upload_files 
             WHERE org_id = %s 
-            AND processing_status IN ('pending_review', 'failed', 'completed', 'exception')
+            AND processing_status IN ('pending_review', 'completed', 'Ai-Process')
         """, (org_id,))
         count_processed = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM upload_files WHERE org_id = %s AND processing_status = 'pending_review'", (org_id,))
         pg_pending_review = cur.fetchone()[0]
-        # cur.execute("SELECT COUNT(*) FROM upload_files WHERE org_id = %s AND processing_status = 'failed'", (org_id,))
-        # pg_exceptions = cur.fetchone()[0]
+        
         cur.execute("""
             SELECT COUNT(*)
             FROM upload_files
             WHERE org_id = %s
-            AND processing_status IN ('failed', 'template_need', 'Unreadable')
+            AND processing_status IN ('failed', 'needs_template', 'Unreadable', 'exception', 'Ai-Prcoess')
         """, (org_id,))
         pg_exceptions = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM upload_files WHERE org_id = %s AND processing_status = 'needs_template'", (org_id,))
         pg_needs_template = cur.fetchone()[0]
-        # cur.execute("SELECT AVG(ai_payer_confidence) FROM upload_files WHERE org_id = %s AND ai_payer_confidence IS NOT NULL", (org_id,))
-        # pg_acc = cur.fetchone()[0]
-        # pg_accuracy_percent = round(pg_acc, 1) if pg_acc else 0.0
+   
 
         mongo_accuracy_percent = 0.0
         try:
@@ -116,15 +112,15 @@ async def dashboard_summary() -> JSONResponse:
                     docs = extraction_col.find(
                         {
                             "fileId": {"$in": chunk},
-                            "aiConfidence": {"$ne": None}
+                            "totalExtractedAmount": {"$ne": None}
                         },
-                        {"aiConfidence": 1}
+                        {"totalExtractedAmount": 1}
                     )
 
                     results = await docs.to_list(length=500)
                     for d in results:
                         try:
-                            ai_values.append(d["aiConfidence"])
+                            ai_values.append(d["totalExtractedAmount"])
                         except:
                             pass
 
