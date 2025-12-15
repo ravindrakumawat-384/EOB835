@@ -17,13 +17,47 @@ SMTP_PASS = "tnnv rafe surl igon"  # Use app password for Gmail
 
 def send_reset_email(to_email: str, token: str) -> bool:
     try:
+        print("Enter in SEnd Reset mail fucntion")
         msg = EmailMessage()
         msg["Subject"] = "Password Reset"
         msg["From"] = SMTP_USER
         msg["To"] = to_email
-        msg.set_content(
-            f"Hello,\n\nUse the following token to reset your password (copy it exactly, no spaces or line breaks):\n\n{token}\n\nIf you have issues, try pasting the token into a text editor first to remove any extra spaces.\n\nRegards."
+
+        frontend = settings.FRONTEND_URL or ""
+        # reset_link = f"https://your-frontend/reset-password?token={reset_token}"
+        reset_link = f"{frontend.rstrip('/')}" + f"/auth/set-password/{token}"
+        
+        # msg.set_content(
+        #     f"Hello,\n\nUse the following token to reset your password (copy it exactly, no spaces or line breaks):\n\n{reset_link}\n\nIf you have issues, try pasting the token into a text editor first to remove any extra spaces.\n\nRegards."
+        # )
+
+        # msg.set_content(
+        #     f"Hello,\n\n"
+        #     f"Use the following link to reset your password:\n\n"
+        #     f"{reset_link}\n\n"
+        #     f"If you have issues, try pasting the link into a browser.\n\n"
+        #     f"Regards."
+        # )
+
+        msg.add_alternative(
+            f"""
+            <html>
+                <body>
+                    <p>Hello,</p>
+                    <p>
+                        Use the following link to reset your password:<br>
+                        <a href="{reset_link}" style="color:#1a73e8; text-decoration:underline;">Reset Password
+                        </a>
+                    </p>
+                    <p>If you have issues, try pasting the link into your browser.</p>
+                    <p>Regards.</p>
+                </body>
+            </html>
+            """,
+            subtype="html"
         )
+
+
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
             smtp.ehlo()
             smtp.starttls()

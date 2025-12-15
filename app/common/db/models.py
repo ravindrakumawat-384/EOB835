@@ -28,7 +28,19 @@ class User(BaseModel):
     last_login_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    # ...existing code...
 
+# UserProfile model for API responses/requests
+class UserProfile(BaseModel):
+    id: str = Field(default_factory=gen_id)
+    user_id: str
+    mobile: Optional[str] = None
+    location: Optional[str] = None
+    timezone: Optional[str] = None
+    date_format: Optional[str] = None
+    profile_pic_path: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 class OrganizationMembership(BaseModel):
     id: str = Field(default_factory=gen_id)

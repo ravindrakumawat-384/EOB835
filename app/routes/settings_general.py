@@ -36,12 +36,14 @@ def clean_mongo_doc(doc):
 
 
 @router.get("", response_model=Dict[str, Any])
-# async def read_general_settings(user: Dict[str, Any] = Depends(get_current_user)):
-async def read_general_settings():
+async def read_general_settings(user: Dict[str, Any] = Depends(get_current_user)):
+# async def read_general_settings():
     try:
         logger.info("Fetching general settings for user")        
         # user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
-        user_id = "b6ee4982-b5ec-425f-894d-4324adce0f36" #rv
+        # user_id = "b6ee4982-b5ec-425f-894d-4324adce0f36" #rv
+        user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
+
 
         logger.debug(f"User ID: {user_id}")
         
@@ -114,7 +116,9 @@ async def read_general_settings():
 async def patch_general_settings(payload: Dict[str, Any]):
     try:
         # user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
-        user_id = "b6ee4982-b5ec-425f-894d-4324adce0f36" #rv
+        # user_id = "b6ee4982-b5ec-425f-894d-4324adce0f36" #rv
+        user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
+
         
         membership = await db_module.db.organization_memberships.find_one({"user_id": user_id})
 
