@@ -39,12 +39,11 @@ def clean_mongo_doc(doc):
 async def read_general_settings(user: Dict[str, Any] = Depends(get_current_user)):
 # async def read_general_settings():
     try:
+        print("user:", user)
+        user_id = user.get("id")
+        print("User ID:", user_id)
         logger.info("Fetching general settings for user")        
-        # user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
-        # user_id = "b6ee4982-b5ec-425f-894d-4324adce0f36" #rv
-        user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
-
-
+        # user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
         logger.debug(f"User ID: {user_id}")
         
         time_zone = "pt"  # Default time zone
@@ -53,8 +52,11 @@ async def read_general_settings(user: Dict[str, Any] = Depends(get_current_user)
         # user = await db_module.db.users.find_one({"user_id": user_id})
         # logger.debug(f"User: {user}")
         # org_id = user.get("organization_id") or user.get("org_id")
-
-        membership = await db_module.db.organization_memberships.find_one({"user_id": user_id})
+        try:
+            membership = await db_module.db.organization_memberships.find_one({"user_id": user_id})
+        except Exception as e:
+            logger.error(f"Error fetching membership for user_id {user_id}: {e}")
+            raise HTTPException(status_code=500, detail="User membership retrieval failed")
 
         role = membership.get("role")
         org_id = membership.get("org_id") 
@@ -111,15 +113,16 @@ async def read_general_settings(user: Dict[str, Any] = Depends(get_current_user)
         raise HTTPException(status_code=500, detail="Failed to fetch general settings")
 
 
-# @router.put("/", dependencies=[Depends(require_role(["Admin"]))])
-@router.patch("")
-async def patch_general_settings(payload: Dict[str, Any]):
+@router.put("/", dependencies=[Depends(require_role(["Admin"]))])
+# @router.patch("")
+async def patch_general_settings(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
     try:
         # user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
         # user_id = "b6ee4982-b5ec-425f-894d-4324adce0f36" #rv
-        user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
-
-        
+        # user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
+        print("user:", user)
+        user_id = user.get("id")
+        print("User ID:", user_id)
         membership = await db_module.db.organization_memberships.find_one({"user_id": user_id})
 
         org_id = membership.get("org_id")

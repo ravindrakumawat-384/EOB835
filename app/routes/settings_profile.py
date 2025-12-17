@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
 from typing import Dict, Any, Optional
 from ..services.auth_deps import get_current_user
 import app.common.db.db as db_module
@@ -126,6 +127,7 @@ async def update_user_profile(payload: Dict[str, Any]):
     - Date Format
     - Profile Photo
     """
+    print("payload-------------- :", payload)
     try:
         print("payload   update_user_profile:", payload)
 
@@ -151,14 +153,10 @@ async def update_user_profile(payload: Dict[str, Any]):
         update_user_prof = {}
         # if "personalDetails" in payload:
         if payload:
-            print("payload found")
-            print("payload----->>>>> ", payload)
-            print("payload[firstName]----->>>>> ", payload["firstName"])
-            print("payload[organization]----->>>>> ", payload["organization"])
-            # full_name = user_data.get("full_name")
-            # parts = full_name.strip().split()
-            # first_name = parts[0] if parts else ""
-            # last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
+            logger.info("payload found")
+            logger.info(f"payload: {payload}")
+            logger.info(f"payload[firstName]: {payload.get('firstName')}")
+            logger.info(f"payload[organization]: {payload.get('organization')}")
 
             if "firstName" in payload and "lastName" in payload:
                 full_name = f"{payload['firstName']} {payload['lastName']}"
@@ -167,8 +165,8 @@ async def update_user_profile(payload: Dict[str, Any]):
             # if "email" in payload:
             #     update_user["email"] = payload["email"]
             
-            if "phoneNumber" in payload["phoneNumber"]:
-                update_user_prof["phoneNumber"] = payload["phoneNumber"]
+            if "phone" in payload:
+                update_user_prof["mobile"] = payload["phone"]
             
             if "location" in payload:
                 update_user_prof["location"] = payload["location"]
@@ -178,28 +176,24 @@ async def update_user_profile(payload: Dict[str, Any]):
                 # update_data["updated_at"] = datetime.utcnow()
 
             if "dateFormat" in payload:
-                update_user_prof["dateFormat"] = payload["dateFormat"]
+                update_user_prof["date_format"] = payload["dateFormat"]
 
-            print("update_user---> ", update_user)
+            logger.info(f"User update data: {update_user}")
             await DB.users.update_one({"id": user_id}, {"$set": update_user})
             await DB.user_profiles.update_one({"user_id": user_id}, {"$set": update_user_prof})
 
 
             # Update organization membership
             org_update = {}            
-            if "organization" in payload["organization"]: 
-                org_update["organization"] = payload["organization"]
-            print("org_update---> ", org_update)
+            if "organization" in payload: 
+                org_update["name"] = payload["organization"]
 
-            # Get organization membership and role            
+            logger.info(f"Organization update data: {org_update}")
+
             membership = await db_module.db.organization_memberships.find_one({"user_id": user_id})
-            # org = await db_module.db.organizations.find_one({"id": membership.get("org_id")})
 
-            await DB.organizations.update_one({"id": membership.get("org_id")}, {"$set": org_update})
-        
-            # Update profile photo
-            # if "photoPath" in payload:
-                # update_data["photo_path"] = payload["photoPath"]
+            if org_update:
+                await db_module.db.organizations.update_one({"id": membership.get("org_id")}, {"$set": org_update})
         
         logger.info(f"User profile updated successfully for user_id: {user_id}")
         return {"success":"User profile updated successfully"}
@@ -211,11 +205,13 @@ async def update_user_profile(payload: Dict[str, Any]):
         raise HTTPException(status_code=500, detail="Failed to update user profile")
 
 
-# GET API to retrieve the user's profile picture path
-@router.get("/profile-pic", response_model=Dict[str, Any])
+
+# GET API to return the actual uploaded profile image file
+# @router.post("/upload-profile-pic", response_model=Dict[str, Any])
+@router.get("/profile-pic")
 async def get_profile_pic():
     """
-    Get the profile picture path for the user.
+    Get the actual uploaded profile picture file for the user.
     """
     try:
         user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4"  # TODO: Replace with Depends(get_current_user)
@@ -223,7 +219,21 @@ async def get_profile_pic():
         if not user_prof_data or not user_prof_data.get("profile_pic_path"):
             logger.warning(f"Profile picture not found for user_id: {user_id}")
             raise HTTPException(status_code=404, detail="Profile picture not found")
-        return {"profile_pic_path": user_prof_data["profile_pic_path"]}
+        file_path = user_prof_data["profile_pic_path"]
+        if not os.path.exists(file_path):
+            logger.warning(f"Profile picture file not found on disk: {file_path}")
+            raise HTTPException(status_code=404, detail="Profile picture file not found")
+        # Guess content type from file extension
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext in [".jpg", ".jpeg"]:
+            media_type = "image/jpeg"
+        elif ext == ".png":
+            media_type = "image/png"
+        elif ext == ".gif":
+            media_type = "image/gif"
+        else:
+            media_type = "application/octet-stream"
+        return FileResponse(file_path, media_type=media_type)
     except HTTPException:
         raise
     except Exception as e:
@@ -233,46 +243,51 @@ async def get_profile_pic():
 
 # @router.patch("/upload-profile-pic", response_model=Dict[str, Any])
 # async def update_user_profile(payload: Dict[str, Any]):
-@router.post("/upload-profile-pic", response_model=Dict[str, Any]) # TODO: Replace with Depends(get_current_user)
-async def upload_profile_pic(file: UploadFile = File(...)): 
-    """
-    Upload a profile picture for the user. Stores file and updates user profile_pic_path in MongoDB.
 
-    Update user profile information including:
-    - Personal Information (first name, last name, phone)
-    - Location
-    - Timezone
-    - Date Format
-    - Profile Photo
+@router.post("/upload-profile-pic", response_model=Dict[str, Any])
+async def upload_profile_pic(file: UploadFile = File(...)):
+    """
+    Upload a profile picture for the user. Accepts Angular File object, validates type/size, saves file, updates MongoDB.
+    Allowed types: JPG, PNG, GIF. Max size: 2MB.
     """
     try:
-        user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
-    
-        # Get user details
+        user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4"  # TODO: Replace with Depends(get_current_user)
         user_prof_data = await db_module.db.user_profiles.find_one({"user_id": user_id})
-        
         if not user_prof_data:
             logger.warning(f"User not found: {user_id}")
             raise HTTPException(status_code=404, detail="User not found")
-        
-        user_prof_data = await db_module.db.user_profiles.find_one({"user_id": user_id})
-        print("user_prof_data------------------> ", user_prof_data)
 
-        # Save uploaded file to disk (or cloud storage)
+        # Validate file type
+        allowed_types = ["image/jpeg", "image/png", "image/gif"]
+        if file.content_type not in allowed_types:
+            logger.warning(f"Invalid file type: {file.content_type}")
+            raise HTTPException(status_code=400, detail="Invalid file type. Only JPG, PNG, GIF allowed.")
+
+        # Validate file size (max 2MB)
+        contents = await file.read()
+        if len(contents) > 2 * 1024 * 1024:
+            logger.warning(f"File too large: {len(contents)} bytes")
+            raise HTTPException(status_code=400, detail="File too large. Max size is 2MB.")
+
+        # Save uploaded file to disk
         upload_dir = "uploaded_profile_pics"
         os.makedirs(upload_dir, exist_ok=True)
         filename = f"{user_id}_{int(datetime.utcnow().timestamp())}_{file.filename}"
         file_path = os.path.join(upload_dir, filename)
-
         with open(file_path, "wb") as f:
-            content = await file.read()
-            f.write(content)
+            f.write(contents)
 
         # Update user profile_pic_path in MongoDB
         await DB.user_profiles.update_one({"user_id": user_id}, {"$set": {"profile_pic_path": file_path, "updated_at": datetime.utcnow()}})
         logger.info(f"Profile picture uploaded for user_id: {user_id}, path: {file_path}")
         return {"success": True, "profile_pic_path": file_path}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to upload profile picture: {e}")
         raise HTTPException(status_code=500, detail="Failed to upload profile picture")
     
+
+
+
+
