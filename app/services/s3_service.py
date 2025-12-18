@@ -1,6 +1,7 @@
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from typing import Optional
+from urllib.parse import urlparse
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -27,9 +28,15 @@ class S3Service:
     def generate_presigned_url(self, s3_key: str, expiration: int = 3600) -> Optional[str]:
         """Generate a presigned URL for downloading a file from S3"""
         try:
+            parsed = urlparse(s3_key)
+            print('parsed=====', parsed)
+            bucket_name = parsed.netloc
+            print('bucket_name=====', bucket_name)
+            object_key = parsed.path.lstrip("/")
+            print('object_key=====', object_key)    
             response = self.s3.generate_presigned_url(
                 'get_object',
-                Params={'Bucket': self.bucket_name, 'Key': s3_key},
+                Params={'Bucket': bucket_name, 'Key': object_key},
                 ExpiresIn=expiration
             )
             logger.info(f"Generated presigned URL for {s3_key}")
