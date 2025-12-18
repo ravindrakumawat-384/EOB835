@@ -3,184 +3,279 @@ from typing import Dict, Any, List
 import psycopg2
 from ..services.pg_upload_files import get_pg_conn
 import json
+from app.common.db.db import init_db
+from ..utils.logger import get_logger
+from ..services.pg_upload_files import get_pg_conn
+from app.services.s3_service import S3Service
+from app.common.config import settings
+from datetime import datetime
+from pymongo import ReturnDocument
+from pymongo import ReturnDocument
+from typing import Dict, Any
+
+DB = init_db()
+logger = get_logger(__name__) 
 
 router = APIRouter(prefix="/claims", tags=["claims"])
 
-@router.get("/latest/{count}")
-def get_latest_claims(count: int = 10) -> List[Dict[str, Any]]:
+@router.get("/claim_details/")
+async def get_claims_detail(claim_id: str) -> Dict[str, Any]:
     """
-    Get the latest claims from PostgreSQL database.
+    Get the claim details with the given claim ID and database uses for this mongodb and PostgreSQL.
+    upload file table to get the S3 storage path.
+    mongoDB to get the claim data
     """
-    conn = get_pg_conn()
-    cur = conn.cursor()
-    
     try:
-        # Query to get latest claims with payer and payment info
-        query = """
-        SELECT 
-            c.id as claim_id,
-            c.claim_number,
-            c.patient_name,
-            c.member_id,
-            c.provider_name,
-            c.total_billed_amount,
-            c.total_allowed_amount,
-            c.total_paid_amount,
-            c.total_adjustment_amount,
-            c.service_date_from,
-            c.service_date_to,
-            c.validation_score,
-            c.status,
-            c.created_at,
-            p.name as payer_name,
-            py.payment_reference,
-            py.payment_amount,
-            py.payment_date
-        FROM claims c
-        JOIN payments py ON c.payment_id = py.id
-        JOIN payers p ON py.payer_id = p.id
-        ORDER BY c.created_at DESC
-        LIMIT %s
-        """
-        
-        cur.execute(query, (count,))
-        rows = cur.fetchall()
-        
-        # Convert to list of dictionaries
-        columns = [desc[0] for desc in cur.description]
-        claims = []
-        
-        for row in rows:
-            claim_dict = dict(zip(columns, row))
-            # Convert Decimal and datetime to string for JSON serialization
-            for key, value in claim_dict.items():
-                if hasattr(value, 'isoformat'):  # datetime
-                    claim_dict[key] = value.isoformat()
-                elif str(type(value)) == "<class 'decimal.Decimal'>":  # Decimal
-                    claim_dict[key] = float(value)
-            claims.append(claim_dict)
-        
-        return claims
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-    finally:
-        cur.close()
-        conn.close()
 
-@router.get("/by-file/{file_id}")
-def get_claims_by_file(file_id: str) -> List[Dict[str, Any]]:
-    """
-    Get all claims for a specific file ID.
-    """
-    conn = get_pg_conn()
-    cur = conn.cursor()
-    
-    try:
-        query = """
-        SELECT 
-            c.id as claim_id,
-            c.claim_number,
-            c.patient_name,
-            c.member_id,
-            c.provider_name,
-            c.total_billed_amount,
-            c.total_allowed_amount,
-            c.total_paid_amount,
-            c.total_adjustment_amount,
-            c.service_date_from,
-            c.service_date_to,
-            c.validation_score,
-            c.status,
-            c.created_at,
-            p.name as payer_name,
-            py.payment_reference,
-            py.payment_amount
-        FROM claims c
-        JOIN payments py ON c.payment_id = py.id
-        JOIN payers p ON py.payer_id = p.id
-        WHERE c.file_id = %s
-        ORDER BY c.created_at ASC
-        """
-        
-        cur.execute(query, (file_id,))
-        rows = cur.fetchall()
-        
-        if not rows:
-            raise HTTPException(status_code=404, detail=f"No claims found for file ID: {file_id}")
-        
-        # Convert to list of dictionaries
-        columns = [desc[0] for desc in cur.description]
-        claims = []
-        
-        for row in rows:
-            claim_dict = dict(zip(columns, row))
-            # Convert types for JSON serialization
-            for key, value in claim_dict.items():
-                if hasattr(value, 'isoformat'):  # datetime
-                    claim_dict[key] = value.isoformat()
-                elif str(type(value)) == "<class 'decimal.Decimal'>":  # Decimal
-                    claim_dict[key] = float(value)
-            claims.append(claim_dict)
-        
-        return claims
-        
-    except Exception as e:
-        if "No claims found" in str(e):
-            raise e
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-    finally:
-        cur.close()
-        conn.close()
-
-@router.get("/stats")
-def get_claims_stats() -> Dict[str, Any]:
-    """
-    Get statistics about stored claims.
-    """
-    conn = get_pg_conn()
-    cur = conn.cursor()
-    
-    try:
-        # Get basic stats
-        queries = {
-            "total_claims": "SELECT COUNT(*) FROM claims",
-            "total_payments": "SELECT COUNT(*) FROM payments", 
-            "total_payers": "SELECT COUNT(*) FROM payers",
-            "total_amount_paid": "SELECT COALESCE(SUM(total_paid_amount), 0) FROM claims",
-            "total_amount_billed": "SELECT COALESCE(SUM(total_billed_amount), 0) FROM claims"
+        extraction_claims = DB["claim_version"]
+        extraction_results = DB["extraction_results"]
+        query = {
+            
+            "extraction_id": claim_id
         }
+        result = await extraction_claims.find_one(query, sort=[("created_at", 1)])
         
-        stats = {}
-        for key, query in queries.items():
-            cur.execute(query)
-            stats[key] = cur.fetchone()[0]
+        if not result:
+            raise HTTPException(status_code=404, detail="Claim not found")
+
+        claim_data = result.get('claim', {})
+        file_id = result.get('file_id', '')
+ 
+        extraction_result = await extraction_results.find_one({"_id": claim_id})
+        claim_number = extraction_result.get('claimNumber', '')
+        status = extraction_result.get('status', '')    
+        print('file_id=====', file_id)
         
-        # Get payer breakdown
-        cur.execute("""
-            SELECT p.name, COUNT(c.id) as claim_count, 
-                   COALESCE(SUM(c.total_paid_amount), 0) as total_paid
-            FROM payers p 
-            LEFT JOIN payments py ON p.id = py.payer_id
-            LEFT JOIN claims c ON py.id = c.payment_id 
-            GROUP BY p.name 
-            ORDER BY claim_count DESC
-        """)
+        # Ensure file_id is a string, not a dict
+        if isinstance(file_id, dict):
+            file_id = str(file_id.get('$oid', '')) if '$oid' in file_id else str(file_id)
         
-        payer_stats = []
-        for row in cur.fetchall():
-            payer_stats.append({
-                "payer_name": row[0],
-                "claim_count": row[1],
-                "total_paid": float(row[2])
-            })
+        conn = get_pg_conn()
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            SELECT id, storage_path, original_filename
+            FROM upload_files
+            WHERE id = %s
+            """,
+            (str(file_id),)
+        )
+
+        result = cur.fetchone()
+        file_id = result[0]
+        storage_path = result[1] if result else None
+        file_name = result[2] if result else None   
         
-        stats["payer_breakdown"] = payer_stats
-        
-        return stats
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-    finally:
+
         cur.close()
         conn.close()
+        
+        # Generate presigned URL for S3 file access
+        presigned_url = None
+        if storage_path:
+            try:
+                
+                
+                # Initialize S3 service
+                s3_service = S3Service(
+                    settings.S3_BUCKET,
+                    settings.AWS_ACCESS_KEY_ID,
+                    settings.AWS_SECRET_ACCESS_KEY,
+                    settings.AWS_REGION
+                )
+                
+                
+                # Generate presigned URL (valid for 5 minutes for better security)
+                presigned_url = s3_service.generate_presigned_url(storage_path, expiration=300)
+                
+                # Fallback: Generate direct S3 URL if bucket is public
+                if not presigned_url:
+                    presigned_url = f"https://{settings.S3_BUCKET}.s3.{settings.AWS_REGION}.amazonaws.com/{s3_key}"
+                
+            except Exception as s3_error:
+                logger.error(f"Error generating presigned URL: {str(s3_error)}")
+        
+        return {"status": 200,
+                "message": "Claims retrieved successfully", 
+                "file_id": file_id,
+                "file_name": file_name,
+                "claim_number": claim_number,
+                "status_claim": status,
+                "file_location": presigned_url,
+                "claim": claim_data,
+                "result": result
+                }
+    except Exception as e:
+        logger.error(f"Database error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Something went wrong while fetching claim details.")
+
+
+# def apply_user_updates(claim: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
+#     """
+#     Update only user-provided keys inside claim.sections[].fields[].value
+#     updates example: {"payer_name": "aman"}
+#     """
+#     if not claim or not updates:
+#         return claim
+
+#     for section in claim.get("sections", []):
+#         for field_obj in section.get("fields", []):
+#             field_key = field_obj.get("field")
+#             if field_key in updates:
+#                 field_obj["value"] = updates[field_key]
+
+#     return claim
+
+def flatten_updates(data: Any, out: Dict[str, Any]):
+    if isinstance(data, dict):
+        for k, v in data.items():
+            if isinstance(v, (dict, list)):
+                flatten_updates(v, out)
+            else:
+                out[k] = v
+    elif isinstance(data, list):
+        for item in data:
+            flatten_updates(item, out)
+
+
+def apply_user_updates(claim: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Accepts ANY JSON shape.
+    Extracts all leaf keys and updates matching claim.fields[].field values.
+    """
+
+    if not claim or not updates:
+        return claim
+
+    flat_updates: Dict[str, Any] = {}
+    flatten_updates(updates, flat_updates)
+
+    for section in claim.get("sections", []):
+        for field_obj in section.get("fields", []):
+            field_key = field_obj.get("field")
+            if field_key in flat_updates:
+                field_obj["value"] = flat_updates[field_key]
+
+    return claim
+
+
+@router.post("/save_claims_data")
+async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: str, check: str):
+    try:
+        version_collection = DB["claim_version"]
+        extraction_collection = DB["extraction_results"]
+        updated_by = "9f44298b-5e30-4a7c-a8cb-1ae003cd9134"
+        query = {
+            "extraction_id": claim_id
+        }
+        result = await version_collection.find_one(query, sort=[("created_at", 1)])
+        print('result=====', result.get("claim", {}))
+        
+        # Get latest version for version calculation
+        latest_version_doc = await version_collection.find_one(
+            {"extraction_id": claim_id},
+            sort=[("version", -1)]
+        )
+        
+        next_version = "1.0"
+        if latest_version_doc:
+            current_version = latest_version_doc.get("version", "1.0")
+            # Split version into major and minor parts
+            version_parts = current_version.split(".")
+            major = int(version_parts[0])
+            minor = int(version_parts[1]) if len(version_parts) > 1 else 0
+            # Increment minor version
+            minor += 1
+            next_version = f"{major}.{minor}"
+
+        if check == "exception":
+            # Update extraction status to 'exception' in extraction_results collection
+            await extraction_collection.update_one(
+                {"_id": claim_id},
+                {"$set": {"status": "exception"}}
+            )
+
+            await version_collection.update_one(
+                {"extraction_id": claim_id},
+                {"$set": {"status": "exception"}}
+            )
+            return {"message": "Claims are marked as exception successfully.", "status": 200}  
+         
+        # Handle draft case
+        if check == "draft":
+            # Insert new version record
+            await version_collection.insert_one({
+                "file_id": file_id,
+                "extraction_id": claim_id,
+                "version": next_version,
+                "claim": claim_json,
+                "created_at": datetime.utcnow(),
+                "updated_by": updated_by,
+                "status": "preview_pending"
+                })
+            result = await version_collection.find_one(query, sort=[("created_at", 1)])
+            predefined_json = result.get("claim", {})
+            # ---------- apply user updates ----------
+            updated_claim = apply_user_updates(predefined_json, claim_json)
+
+            # ---------- version calculation ----------
+            await version_collection.find_one_and_update(
+                {"extraction_id": claim_id},
+                {
+                    "$set": {
+                        "claim": updated_claim,
+                        "updated_at": datetime.utcnow()
+                    }
+                },
+                sort=[("created_at", 1)],   # first record (earliest)
+                return_document=ReturnDocument.AFTER
+)
+
+            return {"message": "Claims are update successfull.", "status": 200}
+        
+        if check == "confirmed":
+            # Update extraction status in extraction_results collection
+            print("under this cindtion")
+            await extraction_collection.update_one(
+                {"_id": claim_id},
+                {"$set": {"status": "completed"}}
+            )
+          
+            await version_collection.insert_one({
+            "file_id": file_id,
+            "extraction_id": claim_id,
+            "version": next_version,
+            "claim": claim_json,
+            "created_at": datetime.utcnow(),
+            "updated_by": updated_by,
+            "status": "completed"
+            })
+
+            result = await version_collection.find_one(query, sort=[("created_at", 1)])
+            predefined_json = result.get("claim", {})
+            # ---------- apply user updates ----------
+            updated_claim = apply_user_updates(predefined_json, claim_json)
+            
+            # ---------- version calculation ----------
+            await version_collection.find_one_and_update(
+                {"extraction_id": claim_id},
+                {
+                    "$set": {
+                        "claim": updated_claim,
+                        "updated_at": datetime.utcnow()
+                    }
+                },
+                sort=[("created_at", 1)],   # first record (earliest)
+                return_document=ReturnDocument.AFTER
+                )
+            
+
+            return {"message": "Claims are completed successfull.", "status": 200}
+        
+        
+    except Exception as e:
+        logger.error(f"Error saving claims data: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to save claims data.")
+
+    

@@ -63,10 +63,10 @@ app.include_router(review_listing.router)
 #upload
 app.include_router(upload.router)
 
-#debug
+debug
 app.include_router(debug.router)
 
-#claims
+claims
 app.include_router(claims.router)
 
 #template

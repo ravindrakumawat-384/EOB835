@@ -25,9 +25,17 @@ from ..services.file_type_handler import (
     clean_extracted_text,
     SUPPORTED_MIME_TYPES
 )
+from app.services.template_db_service import get_pg_conn
+from pymongo import MongoClient
+import os
+from app.common.db.db import init_db
+
+
+DB = init_db() 
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/template", tags=["template"])
-logger = get_logger(__name__)
+
 
 @router.post("/upload", status_code=status.HTTP_200_OK)
 async def upload_template_file(file: UploadFile = File(...)) -> Dict[str, Any]:
@@ -47,7 +55,22 @@ async def upload_template_file(file: UploadFile = File(...)) -> Dict[str, Any]:
     try:
         # 1. Read and validate file content
         content = await file.read()
-        
+
+        # Upload file to S3
+        s3_service = S3Service(
+            bucket_name=settings.S3_BUCKET,
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            region_name=settings.AWS_REGION
+        )
+        s3_key = f"templates/{file.filename}"
+        try:
+            s3_service.upload_file(file_content=content, file_name=s3_key)
+            logger.info(f"Uploaded file to S3: {s3_key}")
+        except Exception as s3e:
+            logger.error(f"Failed to upload file to S3: {s3e}")
+            raise HTTPException(status_code=500, detail="Failed to upload file to S3")
+
         # Basic file validation
         is_valid, validation_error = validate_file_content(content, file.filename)
         if not is_valid:
@@ -78,10 +101,10 @@ async def upload_template_file(file: UploadFile = File(...)) -> Dict[str, Any]:
                 status_code=400, 
                 detail=f"Could not extract meaningful text from {file_extension} file. Processing method: {processing_strategy['method']}"
             )
-
+        print('raw_text=========', raw_text)
         # 5. Clean extracted text based on processing method
         cleaned_text = clean_extracted_text(raw_text, processing_strategy['method'])
-        
+        print('cleaned_text=========', cleaned_text)
         if not cleaned_text or len(cleaned_text.strip()) < 10:
             raise HTTPException(
                 status_code=400, 
@@ -96,7 +119,7 @@ async def upload_template_file(file: UploadFile = File(...)) -> Dict[str, Any]:
         # Final validation before AI processing
         try:
             # Test if the text can be safely encoded/decoded
-            test_json = json.dumps({"test": cleaned_text[:100]})
+            test_json = json.dumps({"test": cleaned_text[:5000]})
             logger.info("Text validation passed for AI processing")
         except (UnicodeDecodeError, UnicodeEncodeError, ValueError) as e:
             logger.error(f"Text encoding validation failed: {e}")
@@ -161,7 +184,9 @@ async def upload_template_file(file: UploadFile = File(...)) -> Dict[str, Any]:
             filename=file.filename,
             org_id=org_id,
             payer_id=payer_id,
-            template_type="other"
+            template_type="other",
+            template_path=s3_key
+            
         )
         
         # 8. Save complete template data using existing schema
@@ -194,6 +219,7 @@ async def upload_template_file(file: UploadFile = File(...)) -> Dict[str, Any]:
             "json_data": json_result,
             "ai_confidence": json_result.get("extraction_confidence", 85),
             "records_created": save_result["records_created"],
+            "file_path": s3_key,
             "message": f"Template processed successfully as {file_extension} file using {processing_strategy['method']} and saved to existing database schema"
         }
         
@@ -258,3 +284,74 @@ async def list_templates() -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error listing templates: {str(e)}")
         raise HTTPException(status_code=500, detail="Failed to list templates")
+    
+    
+@router.get("/template-listing", status_code=status.HTTP_200_OK)
+async def get_template_listing(org_id: str) -> Dict[str, Any]:
+    try:
+        # Connect to Postgres
+        conn = get_pg_conn()
+        cur = conn.cursor()
+
+        # Connect to MongoDB using init_db from db.py
+        
+        builder_collection = DB["template_builder_sessions"]
+
+        # 1. Get all templates for the org
+        cur.execute("""
+            SELECT t.id, t.name
+            FROM templates t
+            WHERE t.org_id = %s
+        """, (org_id,))
+        templates = cur.fetchall()
+
+        result = []
+        for template_id, template_name in templates:
+            # 2. Get latest version for this template
+            cur.execute("""
+                SELECT version_number FROM template_versions
+                WHERE template_id = %s
+                ORDER BY created_at DESC LIMIT 1
+            """, (template_id,))
+            version_row = cur.fetchone()
+            version = version_row[0] if version_row else 0
+            print('template_id=====', template_id)
+            # 3. Get field mapping info and usage count from MongoDB (async)
+            builder_doc = await builder_collection.find_one({"template_id": str(template_id)})
+            total_field = builder_doc.get("total_field") if builder_doc else None
+            mapping_field = builder_doc.get("mapped_field") if builder_doc else None
+            usage_count = await builder_collection.count_documents({"template_id": str(template_id)})
+
+            # if not builder_doc.get("dynamic_keys"):
+            #     return 0
+
+            # total_fields = sum(
+            #     len(section.get("fields", []))
+            #     for section in builder_doc.get("dynamic_keys", [])
+            #     if isinstance(section, dict)
+            # )
+
+
+            result.append({
+                "template_id": template_id,
+                "template_name": template_name,
+                "version": version,
+                "field_mapped ": f"{mapping_field}/{total_field}",
+                "usage_count": usage_count
+            })
+        cur.close()
+        conn.close()
+        return {"message": "templates retrieved successfully", "templates": result}
+    except Exception as e:
+        logger.error(f"Error listing templates: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to list templates")
+    
+
+@router.post("/update-template-version", status_code=status.HTTP_200_OK)
+def update_template_version(template_id: str, template_json: dict, template_info: dict) -> Dict[str, Any]:
+    try:
+        pass
+        
+    except Exception as e:
+        logger.error(f"Error retrieving template version: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve template version")

@@ -67,7 +67,7 @@ async def process_template_with_dynamic_extraction(raw_text: str, filename: str)
             "payments": json_result.get("payments", []),
             "claims": json_result.get("claims", []),
             "service_lines": json_result.get("service_lines", []),
-            "raw_key_value_pairs": json_result.get("raw_key_value_pairs", {})
+            # "raw_key_value_pairs": json_result.get("raw_key_value_pairs", {})
         }
 
         logger.info(f"Processed template: {len(result['claims'])} claims, {len(result['payments'])} payments")
@@ -81,88 +81,335 @@ async def process_template_with_dynamic_extraction(raw_text: str, filename: str)
             "payments": [],
             "claims": [],
             "service_lines": [],
-            "raw_key_value_pairs": {}
+            # "raw_key_value_pairs": {}
         }
 
-def extract_dynamic_keys_from_text(raw_text: str) -> List[str]:
+
+# def extract_dynamic_keys_from_text(raw_text: str) -> list:
+#     """
+#     Use AI to dynamically identify section-wise template fields
+#     from a medical document for frontend template generation.
+#     """
+#     print("Under extract_dynamic_keys_from_text")
+
+#     if not OPENAI_AVAILABLE or not OPENAI_API_KEY:
+#         return extract_keys_fallback(raw_text)
+
+#     try:
+#         # Clean text
+#         clean_text = raw_text.replace("\x00", "").replace("\r", "\n")
+#         clean_text = clean_text.encode("utf-8", errors="ignore").decode("utf-8")
+
+#         client = openai.OpenAI(api_key=OPENAI_API_KEY)
+
+#         prompt = f"""
+#         You are a medical document section-aware extraction engine.
+
+#         INPUT:
+#         OCR text from ONE medical document (PDF/Image/DOC).
+
+#         TASK:
+#         Generate a SECTION-WISE TEMPLATE SCHEMA for frontend rendering.
+
+#         RULES (STRICT):
+#         1. Identify sections:
+#         - File / Payment Information
+#         - Claim Information
+#         - Service Line Details
+#         2. Extract ONLY field metadata (no values).
+#         3. Preserve label meaning from the document.
+#         4. Do NOT normalize across files.
+#         5. Assign UI input type based on data nature.
+#         6. Include confidence score (1–100).
+#         7.
+#         7. Output VALID JSON only.
+
+#         OUTPUT FORMAT (JSON ONLY):
+
+#         {{
+#         "sections": [
+#             {{
+#             "sectionName": "File / Payment Information",
+#             "sectionOrder": 1,
+#             "fields": [
+#                 {{
+#                 "id": "payer",
+#                 "field": "payer",
+#                 "label": "Payer",
+#                 "type": "inputText",
+#                 "fieldOrder": 1,
+#                 "confidence": 0.97,
+#                 "validations": [{"required": true}],
+#                 "placeholder": "Enter payer name"
+#                 }}
+#             ]
+#             }},
+#             {{
+#             "sectionName": "Claim Information",
+#             "sectionOrder": 2,
+#             "fields": [
+#                 {{
+#                 "id": "patient-name",
+#                 "field": "patient_name",
+#                 "label": "Patient Name",
+#                 "type": "inputText",
+#                 "fieldOrder": 1,
+#                 "confidence": 0.98,
+#                 "validations": [{"required": true}],
+#                 "placeholder": "Enter patient name"
+#                 }}
+#             ]
+#             }},
+#             {{
+#             "sectionName": "Service Line Details",
+#             "sectionOrder": 3,
+#             "fields": [
+#                 {{
+#                 "id": "line-control-number",
+#                 "field": "line_control_number",
+#                 "label": "Line Control Number",
+#                 "type": "inputNumber",
+#                 "fieldOrder": 1,
+#                 "confidence": 0.97,
+#                 "validations": [{"required": true}],
+#                 "placeholder": "Enter line control number"
+#                 }}
+#             ]
+#             }}
+#         ]
+#         }}
+
+#         CONSTRAINTS:
+#         - No explanations
+#         - No markdown
+#         - No trailing commas
+#         - Valid JSON only
+
+#         TEXT:
+#         {clean_text[:5000]}
+#         """
+
+#         response = client.chat.completions.create(
+#             model="gpt-4.1mini",
+#             messages=[{"role": "user", "content": prompt}],
+#             temperature=0.1,
+#             max_tokens=1000
+#         )
+
+#         content = response.choices[0].message.content.strip()
+
+#         # Remove accidental markdown
+#         if content.startswith("```"):
+#             content = content.split("```")[1].strip()
+
+#         data = json.loads(content)
+
+#         if isinstance(data, dict) and "sections" in data:
+#             return data["sections"]
+
+#         logger.warning("Unexpected AI response structure")
+#         return extract_keys_fallback(raw_text)
+
+#     except json.JSONDecodeError as je:
+#         logger.error(f"JSON decode error: {je}")
+#         return extract_keys_fallback(raw_text)
+
+#     except Exception as e:
+#         logger.error(f"AI key extraction failed: {e}")
+#         return extract_keys_fallback(raw_text)
+
+
+def extract_dynamic_keys_from_text(raw_text: str) -> list:
     """
-    Use AI to dynamically identify all possible keys/fields from the text data.
-    Returns a list of keys that should be extracted based on the actual content.
+    Use AI to dynamically identify section-wise template fields
+    from a medical document for frontend template generation.
     """
+    print("Under extract_dynamic_keys_from_text")
+
     if not OPENAI_AVAILABLE or not OPENAI_API_KEY:
         return extract_keys_fallback(raw_text)
-    
+
     try:
-        # Clean text for AI processing
-        clean_text = raw_text.replace('\x00', '').replace('\r', '\n')
-        clean_text = clean_text.encode('utf-8', errors='ignore').decode('utf-8')
-        
+        clean_text = (
+            raw_text.replace("\x00", "")
+            .replace("\r", "\n")
+            .encode("utf-8", errors="ignore")
+            .decode("utf-8")
+        )
+
         client = openai.OpenAI(api_key=OPENAI_API_KEY)
-        
+
         prompt = f"""
-        Analyze the following text and identify ALL possible data fields/keys that can be extracted from it.
-        
-        RULES:
-        1. Look for any structured data patterns (key-value pairs, labels, headings)
-        2. Identify financial/medical/business terms that represent extractable data
-        3. Find dates, amounts, names, IDs, codes, addresses, etc.
-        4. Return field names that would be suitable as JSON keys
-        5. Use snake_case format (e.g., "patient_name", "total_amount")
-        6. Be comprehensive - include ALL possible fields you can identify
-        
-        Text to analyze:
-        {clean_text[:3000]}
-        
-        Return ONLY a JSON array of field names, like this:
-        ["field1", "field2", "field3", ...]
-        
-        Do not include explanations, just the JSON array of field names.
-        """
-        
+                You are a STRICT JSON GENERATOR.
+
+                Your task is to OUTPUT A JSON OBJECT THAT MATCHES THE SCHEMA BELOW EXACTLY.
+
+                ⚠️ THIS IS NOT AN EXAMPLE.
+                ⚠️ THIS IS A HARD CONTRACT.
+                ⚠️ DO NOT ADD, REMOVE, OR RENAME KEYS.
+
+                DOCUMENT TYPE:
+                Medical EOB / Remittance / Claim document.
+
+                TASK:
+                Generate a SECTION-WISE TEMPLATE SCHEMA for frontend form rendering.
+                Extract ONLY metadata (no values).
+
+                SECTIONS (FIXED):
+                1. File / Payment Information
+                2. Claim Information
+                3. Service Line Details
+
+                FIELD RULES:
+                - Each field MUST include:
+                id, field, label, type, fieldOrder, confidence, validations, placeholder
+                - confidence MUST be an INTEGER between 1 and 100
+                - type MUST be one of:
+                inputText | inputNumber | inputDate
+                - validations MUST be an array
+                - placeholder MUST be a string
+                - Do NOT invent labels that do not appear in the document
+                - Do NOT mix data between sections
+
+                ⚠️ OUTPUT JSON SCHEMA (MUST MATCH EXACTLY):
+
+                {{
+                "sections": [
+                    {{
+                    "sectionName": "File / Payment Information",
+                    "sectionOrder": 1,
+                    "fields": [
+                        {{
+                        "id": "payer",
+                        "field": "payer",
+                        "label": "Payer",
+                        "type": "inputText",
+                        "fieldOrder": 1,
+                        "confidence": 99,
+                        "validations": [
+                            { "required": true }
+                        ],
+                        "placeholder": "Enter your payer"
+                        }}
+                    ]
+                    }},
+                    {{
+                    "sectionName": "Claim Information",
+                    "sectionOrder": 2,
+                    "fields": [
+                        {{
+                        "id": "patient-name",
+                        "field": "patient_name",
+                        "label": "Patient Name",
+                        "type": "inputText",
+                        "fieldOrder": 1,
+                        "confidence": 99,
+                        "validations": [
+                            { "required": true }
+                        ],
+                        "placeholder": "Enter patient name"
+                        }}
+                    ]
+                    }},
+                    {{
+                    "sectionName": "Service Line Details",
+                    "sectionOrder": 3,
+                    "fields": [
+                        {{
+                        "id": "line-ctrl-number",
+                        "field": "line_ctrl_number",
+                        "label": "Line Control Number",
+                        "type": "inputNumber",
+                        "fieldOrder": 1,
+                        "confidence": 98,
+                        "validations": [
+                            { "required": true }
+                        ],
+                        "placeholder": "Enter line control number"
+                        }}
+                    ]
+                    }}
+                ]
+                }}
+                
+                CONSTRAINTS:
+                - JSON only
+                - No markdown
+                - No comments
+                - No trailing commas
+                - Exact key names
+                - Exact nesting
+
+                TEXT TO ANALYZE:
+                {clean_text[:5000]}
+                """
+
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4.1-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
-            max_tokens=1000
+            max_tokens=1200
         )
-        
+
         content = response.choices[0].message.content.strip()
-        
-        # Clean up response if it has markdown formatting
-        if content.startswith("```json"):
-            content = content[7:]
-        if content.endswith("```"):
-            content = content[:-3]
-        content = content.strip()
-        
-        # Parse the JSON array
-        keys = json.loads(content)
-        
-        if isinstance(keys, list):
-            logger.info(f"🔑 AI extracted {len(keys)} dynamic keys from text")
-            return keys
-        else:
-            logger.warning("AI returned invalid format, using fallback")
-            return extract_keys_fallback(raw_text)
-            
+
+        if content.startswith("```"):
+            content = content.split("```")[1].strip()
+
+        data = json.loads(content)
+
+        if isinstance(data, dict) and "sections" in data:
+            return data["sections"]
+
+        logger.warning("Unexpected AI response structure")
+        return extract_keys_fallback(raw_text)
+
     except Exception as e:
         logger.error(f"AI key extraction failed: {e}")
         return extract_keys_fallback(raw_text)
 
-def extract_keys_fallback(raw_text: str) -> List[str]:
+
+
+def extract_keys_fallback(raw_text: str) -> List[Dict[str, Any]]:
     """
-    Fallback method to extract keys using pattern matching when AI is not available.
+    Fallback method to extract keys and return structured sections format
+    when AI is not available. Returns the same structure as AI extraction.
     """
-    keys = set()
+    # Initialize section containers
+    payment_fields = []
+    claim_fields = []
+    service_line_fields = []
+    
     lines = raw_text.split('\n')
+    text_lower = raw_text.lower()
+    
+    # Helper function to determine field type from key/value
+    def infer_field_type(key: str, value: str = "") -> str:
+        key_lower = key.lower()
+        value_lower = value.lower() if value else ""
+        
+        # Date fields
+        if any(d in key_lower for d in ['date', 'dob', 'dos', 'time', 'period']):
+            return "inputDate"
+        # Numeric/Amount fields    
+        if any(a in key_lower for a in ['amount', 'charge', 'payment', 'paid', 'billed', 'total', 'units', 'quantity', 'number', 'count', 'id', 'code']):
+            if any(c in key_lower for c in ['code', 'id', 'number', 'reference']):
+                return "inputText"
+            return "inputNumber"
+        # Default to text
+        return "inputText"
+    
+    # Helper function to convert key to label
+    def key_to_label(key: str) -> str:
+        return ' '.join(word.capitalize() for word in key.replace('_', ' ').replace('-', ' ').split())
     
     # Common patterns for key-value extraction
     patterns = [
-        r'([A-Za-z\s]+):',  # "Label:" pattern
-        r'([A-Za-z\s]+)\s*=',  # "Label =" pattern
-        r'([A-Za-z\s]+)\s+\$?\d+',  # "Label $123" or "Label 123"
-        r'([A-Z][A-Z\s]+)\s+[A-Z0-9]',  # "UPPERCASE LABEL ABC123"
+        r'([A-Za-z][A-Za-z\s]+):',  # "Label:" pattern
+        r'([A-Za-z][A-Za-z\s]+)\s*=',  # "Label =" pattern
     ]
+    
+    extracted_keys = set()
     
     # Extract potential keys using regex patterns
     for line in lines:
@@ -179,33 +426,154 @@ def extract_keys_fallback(raw_text: str) -> List[str]:
                 key = '_'.join(key.split())  # Convert to snake_case
                 
                 if len(key) > 2 and len(key) < 50:  # Reasonable key length
-                    keys.add(key)
+                    extracted_keys.add(key)
     
-    # Add some common financial/medical fields if we find relevant content
-    text_lower = raw_text.lower()
+    # Categorize keys into sections based on content
+    payment_keywords = ['payment', 'payer', 'check', 'eft', 'trace', 'transaction', 'remit']
+    claim_keywords = ['claim', 'patient', 'member', 'provider', 'subscriber', 'policy', 'group', 'insured']
+    service_keywords = ['service', 'line', 'procedure', 'cpt', 'modifier', 'units', 'charge', 'dos']
     
+    field_order_payment = 1
+    field_order_claim = 1
+    field_order_service = 1
+    
+    for key in extracted_keys:
+        field_type = infer_field_type(key)
+        label = key_to_label(key)
+        confidence = 0.75  # Lower confidence for fallback extraction
+        
+        field_obj = {
+            "field": key,
+            "label": label,
+            "type": field_type,
+            "confidence": confidence
+        }
+        
+        # Categorize by keywords
+        if any(kw in key for kw in service_keywords):
+            field_obj["fieldOrder"] = field_order_service
+            service_line_fields.append(field_obj)
+            field_order_service += 1
+        elif any(kw in key for kw in claim_keywords):
+            field_obj["fieldOrder"] = field_order_claim
+            claim_fields.append(field_obj)
+            field_order_claim += 1
+        elif any(kw in key for kw in payment_keywords):
+            field_obj["fieldOrder"] = field_order_payment
+            payment_fields.append(field_obj)
+            field_order_payment += 1
+        else:
+            # Default to claim section for unknown keys
+            field_obj["fieldOrder"] = field_order_claim
+            claim_fields.append(field_obj)
+            field_order_claim += 1
+    
+    # Add common expected fields if document contains relevant content
     if 'patient' in text_lower or 'member' in text_lower:
-        keys.update(['patient_name', 'member_id', 'patient_id'])
-    
-    if 'claim' in text_lower:
-        keys.update(['claim_number', 'claim_date', 'claim_amount'])
+        if not any(f["field"] == "patient_name" for f in claim_fields):
+            claim_fields.insert(0, {"field": "patient_name", "label": "Patient Name", "type": "inputText", "fieldOrder": 0, "confidence": 0.70})
+        if not any(f["field"] == "member_id" for f in claim_fields):
+            claim_fields.append({"field": "member_id", "label": "Member ID", "type": "inputText", "fieldOrder": len(claim_fields) + 1, "confidence": 0.70})
     
     if '$' in raw_text or 'amount' in text_lower:
-        keys.update(['total_amount', 'paid_amount', 'billed_amount'])
+        if not any(f["field"] == "total_amount" for f in payment_fields):
+            payment_fields.append({"field": "total_amount", "label": "Total Amount", "type": "inputNumber", "fieldOrder": len(payment_fields) + 1, "confidence": 0.70})
+        if not any(f["field"] == "paid_amount" for f in payment_fields):
+            payment_fields.append({"field": "paid_amount", "label": "Paid Amount", "type": "inputNumber", "fieldOrder": len(payment_fields) + 1, "confidence": 0.70})
+    
+    if 'claim' in text_lower:
+        if not any(f["field"] == "claim_number" for f in claim_fields):
+            claim_fields.append({"field": "claim_number", "label": "Claim Number", "type": "inputText", "fieldOrder": len(claim_fields) + 1, "confidence": 0.70})
     
     if 'date' in text_lower or re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{4}', raw_text):
-        keys.update(['service_date', 'process_date', 'payment_date'])
+        if not any(f["field"] == "service_date" for f in service_line_fields):
+            service_line_fields.append({"field": "service_date", "label": "Service Date", "type": "inputDate", "fieldOrder": len(service_line_fields) + 1, "confidence": 0.70})
+        if not any(f["field"] == "payment_date" for f in payment_fields):
+            payment_fields.append({"field": "payment_date", "label": "Payment Date", "type": "inputDate", "fieldOrder": len(payment_fields) + 1, "confidence": 0.70})
     
-    result_keys = list(keys)[:30]  # Limit to 30 keys max
-    logger.info(f"🔄 Fallback extracted {len(result_keys)} keys from text")
-    return result_keys
+    # Re-number field orders
+    for i, f in enumerate(payment_fields, 1):
+        f["fieldOrder"] = i
+    for i, f in enumerate(claim_fields, 1):
+        f["fieldOrder"] = i
+    for i, f in enumerate(service_line_fields, 1):
+        f["fieldOrder"] = i
+    
+    # Build sections array
+    sections = []
+    
+    if payment_fields:
+        sections.append({
+            "sectionName": "File / Payment Information",
+            "sectionOrder": 1,
+            "fields": payment_fields[:15]  # Limit fields per section
+        })
+    
+    if claim_fields:
+        sections.append({
+            "sectionName": "Claim Information",
+            "sectionOrder": 2,
+            "fields": claim_fields[:15]
+        })
+    
+    if service_line_fields:
+        sections.append({
+            "sectionName": "Service Line Details",
+            "sectionOrder": 3,
+            "fields": service_line_fields[:15]
+        })
+    
+    # Ensure at least one section exists
+    if not sections:
+        sections.append({
+            "sectionName": "Extracted Fields",
+            "sectionOrder": 1,
+            "fields": [{
+                "field": "raw_data",
+                "label": "Raw Data",
+                "type": "inputText",
+                "fieldOrder": 1,
+                "confidence": 0.50
+            }]
+        })
+    
+    total_fields = sum(len(s["fields"]) for s in sections)
+    logger.info(f"🔄 Fallback extracted {total_fields} fields across {len(sections)} sections")
+    return sections
 
-def convert_text_to_dynamic_json(raw_text: str, dynamic_keys: List[str], filename: str) -> Dict[str, Any]:
+
+def extract_flat_keys_from_sections(dynamic_keys: Any) -> List[str]:
+    """
+    Extract flat field names from the sections structure.
+    Handles both new section-based format and legacy flat list format.
+    """
+    flat_keys = []
+    
+    # If it's already a flat list of strings (legacy format)
+    if isinstance(dynamic_keys, list) and len(dynamic_keys) > 0:
+        if isinstance(dynamic_keys[0], str):
+            return dynamic_keys[:30]  # Already flat, return as-is
+        
+        # New section-based format
+        for section in dynamic_keys:
+            if isinstance(section, dict) and "fields" in section:
+                for field in section.get("fields", []):
+                    if isinstance(field, dict) and "field" in field:
+                        flat_keys.append(field["field"])
+    
+    return flat_keys[:30]  # Limit to 30 keys
+
+
+def convert_text_to_dynamic_json(raw_text: str, dynamic_keys: Any, filename: str) -> Dict[str, Any]:
     """
     Use AI to convert text to JSON using only the dynamically identified keys.
+    Accepts both section-based (new) and flat list (legacy) formats for dynamic_keys.
     """
+    # Extract flat keys from sections if needed
+    flat_keys = extract_flat_keys_from_sections(dynamic_keys)
+    
     if not OPENAI_AVAILABLE or not OPENAI_API_KEY:
-        return convert_to_json_fallback(raw_text, dynamic_keys)
+        return convert_to_json_fallback(raw_text, flat_keys)
     
     try:
         # Clean text for AI processing
@@ -217,7 +585,7 @@ def convert_text_to_dynamic_json(raw_text: str, dynamic_keys: List[str], filenam
         
         # Create dynamic JSON schema based on identified keys
         schema_fields = []
-        for key in dynamic_keys[:20]:  # Limit to 20 keys for prompt size
+        for key in flat_keys[:20]:  # Limit to 20 keys for prompt size
             schema_fields.append(f'"{key}": "extracted_value_or_null"')
         
         schema_example = "{\n    " + ",\n    ".join(schema_fields) + "\n}"
@@ -225,7 +593,7 @@ def convert_text_to_dynamic_json(raw_text: str, dynamic_keys: List[str], filenam
         prompt = f"""
         Extract data from the following text and convert it to a structured JSON format.
         
-        Available keys found in text: {', '.join(dynamic_keys[:15])}
+        Available keys found in text: {', '.join(flat_keys[:15])}
         
         IMPORTANT: Return ONLY valid JSON without any markdown formatting or additional text.
         
@@ -296,7 +664,7 @@ def convert_text_to_dynamic_json(raw_text: str, dynamic_keys: List[str], filenam
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
+            temperature=0.7,
             max_tokens=2000
         )
         
@@ -343,7 +711,7 @@ def convert_text_to_dynamic_json(raw_text: str, dynamic_keys: List[str], filenam
             result = json.loads(content)
         
         # Post-process and enhance the result
-        result = enhance_json_result(result, dynamic_keys, raw_text)
+        result = enhance_json_result(result, flat_keys, raw_text)
         
         # Ensure we have confidence score
         if "extraction_confidence" not in result:
@@ -354,7 +722,7 @@ def convert_text_to_dynamic_json(raw_text: str, dynamic_keys: List[str], filenam
         
     except Exception as e:
         logger.error(f"AI JSON conversion failed: {e}")
-        return convert_to_json_fallback(raw_text, dynamic_keys)
+        return convert_to_json_fallback(raw_text, flat_keys)
 
 def enhance_json_result(result: Dict[str, Any], dynamic_keys: List[str], raw_text: str) -> Dict[str, Any]:
     """

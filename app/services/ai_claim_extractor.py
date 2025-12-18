@@ -26,7 +26,7 @@ except ImportError as e:
     OPENAI_AVAILABLE = False
     OPENAI_API_KEY = None
 
-def ai_extract_claims(raw_text: str) -> Dict[str, Any]:
+def ai_extract_claims(raw_text: str, dynamic_key: List[str]) -> Dict[str, Any]:
     """
     Use ONLY AI model to extract claims from raw text and convert to structured JSON.
     Returns extraction result with confidence scores.
@@ -37,14 +37,15 @@ def ai_extract_claims(raw_text: str) -> Dict[str, Any]:
     # Use ONLY AI extraction - provide fallback for testing
     if OPENAI_AVAILABLE and OPENAI_API_KEY:
         try:
-            result = extract_with_openai(raw_text)
-            if result.get("claims"):
-                return result
-            else:
-                logger.warning("OpenAI returned empty claims, using fallback")
-                return create_fallback_result(raw_text)
+            result = extract_with_openai(raw_text, dynamic_key)
+            # if result.get("claims"):
+            #     return result
+            # else:
+            #     logger.warning("OpenAI returned empty claims, using fallback")
+            #     return create_fallback_result(raw_text)
+            return result
         except Exception as e:
-            logger.error(f"OpenAI extraction failed: {e}")
+            logger.error("OpenAI extraction failed: %s", str(e))
             return create_fallback_result(raw_text)
     else:
         logger.warning("OpenAI not available, using fallback extraction")
@@ -151,100 +152,251 @@ def create_fallback_result(raw_text: str) -> Dict[str, Any]:
         "claims": claims
     }
 
-def extract_with_openai(raw_text: str) -> Dict[str, Any]:
+# def extract_with_openai(raw_text: str, dynamic_key: List[str]) -> Dict[str, Any]:
+#     """
+#     Use OpenAI to extract structured data matching database schema with confidence scores.
+#     """
+#     try:
+#         # Initialize OpenAI client with configured API key
+#         client = openai.OpenAI(api_key=OPENAI_API_KEY)
+        
+#         prompt = f"""
+#         You are given TWO inputs:
+
+# INPUT 1:
+# A JSON object named `dynamic_keys` (structure exactly like provided), containing:
+# - sections (id, sectionName, dataKey, sectionOrder)
+# - fields (id, field, label, type, fieldOrder, confidence)
+
+# INPUT 2:
+# Raw document text.
+
+# GOAL:
+# Use `dynamic_keys` to CONTROL the response structure.
+# Extract values from text and RETURN a response JSON where:
+# - Structure comes from `dynamic_keys`
+# - Data comes from extracted text
+
+# RULES (STRICT):
+
+# 1. `dynamic_keys` is LEVEL-0 (source schema).
+# 2. Each section in `dynamic_keys` is LEVEL-1.
+# 3. Each field inside a section is LEVEL-2.
+# 4. Do NOT add, remove, rename, or reorder sections or fields.
+# 5. Do NOT hardcode field names.
+# 6. Do NOT invent values.
+# 7. Extract values ONLY if present in text; otherwise return null.
+
+# BEHAVIOR:
+
+# For EACH section in `dynamic_keys`:
+# - Create the same section in response.
+# - Copy `sectionName`, `sectionOrder`, and `dataKey`.
+
+# For EACH field inside the section:
+# - Create the same field object.
+# - Add ONE new key named `"value"`.
+# - `"value"` must contain the extracted value from text.
+# - Extraction must respect section context.
+# - Type hint (`type`) guides format (date, number, text).
+
+# OUTPUT FORMAT (FINAL RESPONSE):
+
+# {
+#   "sections": [
+#     {
+#       "sectionName": "<sectionName>",
+#       "dataKey": "<dataKey>",
+#       "sectionOrder": <number>,
+#       "fields": [
+#         {
+#           "field": "<field>",
+#           "value": "<extracted_value_or_null>"
+#         }
+#       ]
+#     }
+#   ]
+# }
+
+# CONSTRAINTS:
+# - Output ONLY valid JSON.
+# - No explanations.
+# - No extra keys.
+# - No confidence, label, or type in response.
+# - Dynamic structure must work for ANY future `dynamic_keys`.
+
+# RETURN ONLY JSON.
+
+
+
+#         Extract data from this text:
+#         {raw_text[:4000]}
+
+        
+#         """        
+#         response = client.chat.completions.create(
+#             model="gpt-4o-mini",
+#             messages=[{"role": "user", "content": prompt}],
+#             temperature=0.1,
+#             max_tokens=3000
+#         )
+        
+#         content = response.choices[0].message.content.strip()
+#         print( "OpenAI raw response content:=========", content)
+        
+#         # Clean up response if it has markdown formatting
+#         if content.startswith("```json"):
+#             content = content[7:]
+#         if content.endswith("```"):
+#             content = content[:-3]
+#         content = content.strip()
+        
+#         result = json.loads(content)
+        
+#         # Ensure confidence is included
+#         if "confidence" not in result:
+#             result["confidence"] = 70  # Default confidence
+#         print( "OpenAI extraction result:=========", result)
+#         return result
+        
+#     except json.JSONDecodeError as e:
+#         logger.error("JSON decode error: %s", str(e))
+#         logger.error("Raw content: %s", content)
+#         return {"claims": [], "confidence": 0, "error": "JSON decode error: " + str(e)}
+#     except Exception as e:
+#         logger.error("OpenAI API error: %s", str(e))
+#         return {"claims": [], "confidence": 0, "error": "API error: " + str(e)}
+
+
+
+def extract_with_openai(raw_text: str, dynamic_keys: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    Use OpenAI to extract structured data matching database schema with confidence scores.
+    Extract structured data from raw text using dynamic_keys driven schema.
     """
+
     try:
-        # Initialize OpenAI client with configured API key
         client = openai.OpenAI(api_key=OPENAI_API_KEY)
-        
-        prompt = f"""
-        Extract EOB/remittance data from the text and return structured JSON matching this exact format:
 
-        {{
-            "confidence": 95,
-            "payer_info": {{
-                "name": "Insurance Company Name",
-                "code": "PAYER123",
-                "confidence": 90
-            }},
-            "payment": {{
-                "payment_reference": "CHK123456",
-                "payment_date": "2025-01-15",
-                "payment_amount": 500.00,
-                "currency": "USD",
-                "confidence": 95
-            }},
-            "claims": [
-                {{
-                    "claim_number": "CLM001",
-                    "patient_name": "John Doe",
-                    "member_id": "MEM123",
-                    "provider_name": "ABC Medical",
-                    "total_billed_amount": 200.00,
-                    "total_allowed_amount": 150.00,
-                    "total_paid_amount": 100.00,
-                    "total_adjustment_amount": 50.00,
-                    "claim_status_code": "1",
-                    "service_date_from": "2025-01-10",
-                    "service_date_to": "2025-01-10",
-                    "confidence": 85,
-                    "service_lines": [
-                        {{
-                            "line_number": 1,
-                            "cpt_code": "99213",
-                            "dos_from": "2025-01-10",
-                            "dos_to": "2025-01-10",
-                            "billed_amount": 200.00,
-                            "allowed_amount": 150.00,
-                            "paid_amount": 100.00,
-                            "units": 1,
-                            "confidence": 80
-                        }}
-                    ]
-                }}
+        prompt = """
+            You are given TWO inputs.
+
+            INPUT 1:
+            A JSON object named `dynamic_keys`.
+            It defines the EXACT response schema.
+            It contains sections and fields with metadata.
+
+            INPUT 2:
+            Raw document text.
+
+            GOAL:
+            Return extracted data by COPYING the structure of `dynamic_keys`
+            and ADDING ONE key named `value` inside EACH field.
+
+            STRICT RULES:
+
+            1. DO NOT remove any existing keys.
+            2. DO NOT rename any keys.
+            3. DO NOT add new keys except `value`.
+            4. DO NOT reorder sections or fields.
+            5. Preserve ALL field properties:
+            - id
+            - field
+            - label
+            - type
+            - fieldOrder
+            - confidence
+            6. Add `"value"` to every field.
+            7. Extract values ONLY from text.
+            8. If value is not found, set `"value": null`.
+
+            LEVEL BEHAVIOR:
+            - dynamic_keys = schema
+            - section = grouping
+            - field = extraction unit
+
+            MANDATORY OUTPUT FORMAT:
+
+            {
+            "sections": [
+                {
+                "id": "<same as input>",
+                "sectionName": "<same as input>",
+                "dataKey": "<same as input>",
+                "sectionOrder": <same as input>,
+                "fields": [
+                    {
+                    "id": "<same>",
+                    "field": "<same>",
+                    "label": "<same>",
+                    "type": "<same>",
+                    "fieldOrder": <same>,
+                    "confidence": <same>,
+                    "value": "<extracted_value_or_null>"
+                    }
+                ]
+                }
             ]
-        }}
+            }
 
-        Extract data from this text:
-        {raw_text[:4000]}
+            NO explanations.
+            NO markdown.
+            ONLY valid JSON.
 
-        Return ONLY valid JSON with confidence scores (0-100) for each section:
-        """
-        
-        
+            dynamic_keys:
+            """ + json.dumps(dynamic_keys, ensure_ascii=False) + """
+
+            RAW TEXT:
+            """ + raw_text[:4000]
+
         response = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-            max_tokens=3000
+            messages=[
+                {"role": "system", "content": "You are a strict JSON extraction engine."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0,
+            max_tokens=3000,
         )
-        
+
         content = response.choices[0].message.content.strip()
-        
-        # Clean up response if it has markdown formatting
-        if content.startswith("```json"):
-            content = content[7:]
-        if content.endswith("```"):
-            content = content[:-3]
-        content = content.strip()
-        
+
+        # Remove markdown if present
+        if content.startswith("```"):
+            content = content.split("```")[1]
+
         result = json.loads(content)
-        
-        # Ensure confidence is included
-        if "confidence" not in result:
-            result["confidence"] = 70  # Default confidence
-        
+
+        # HARD GUARANTEE: every field has `value`
+        for section in result.get("sections", []):
+            for field in section.get("fields", []):
+                field.setdefault("value", None)
+        print("OpenAI extraction result:=========", result)
         return result
-        
+
     except json.JSONDecodeError as e:
-        logger.error(f"JSON decode error: {e}")
-        logger.error(f"Raw content: {content}")
-        return {"claims": [], "confidence": 0, "error": f"JSON decode error: {e}"}
+        logger.error("JSON decode failed", exc_info=True)
+        return {
+            "sections": [],
+            "error": "Invalid JSON returned by AI",
+            "details": str(e),
+        }
+
+    except openai.OpenAIError as e:
+        logger.error("OpenAI API error", exc_info=True)
+        return {
+            "sections": [],
+            "error": "OpenAI API error",
+            "details": str(e),
+        }
+
     except Exception as e:
-        logger.error(f"OpenAI API error: {e}")
-        return {"claims": [], "confidence": 0, "error": f"API error: {e}"}
+        logger.error("Unexpected extraction error", exc_info=True)
+        return {
+            "sections": [],
+            "error": "Unhandled extraction error",
+            "details": str(e),
+        }
+
 
 def extract_with_rules(raw_text: str) -> List[Dict[str, Any]]:
     """
@@ -274,30 +426,174 @@ def extract_with_rules(raw_text: str) -> List[Dict[str, Any]]:
         }
     ]
 
+
+def flatten_claims2(data: dict) -> dict:
+    """
+    Fetch:
+    - payer name
+    - remark_payer_code
+    - payment_reference
+    - payment_date
+    - payment_amount
+    """
+
+    result = {
+        "payer": None,
+        "remark_payer_code": None,
+        "payment_reference": None,
+        "payment_date": None,
+        "payment_amount": None,
+        "claim_payment": None,
+        "claim_number": None,
+        "patient_name": None,
+        "payee_name": None, 
+        "payment": None,
+       
+        "total_paid": None,
+        "adj_amount": None,
+        "claim_status_code": None,
+        "dates_of_service" : None,
+        "claim_confidence": None,
+        "procedure_code": None,
+        "dates_of_service": None,
+        "units": None,
+        "patient_id": None,
+        "section": None
+
+        
+    }
+
+    # iterate all sections → all fields
+    for section in data.get("sections", []):
+        for field in section.get("fields", []):
+
+            field_name = field.get("field")
+            value = field.get("value")
+            confidence = field.get("confidence")
+
+            print("field_name===========:", field_name)
+
+            if field_name == "payer":
+                result["payer_name"] = value
+
+            elif field_name == "remark_payer_code":
+                result["payer_code"] = value
+
+            elif field_name == "check_eft_trace_number":
+                result["payment_reference"] = value
+
+            elif field_name == "check_eft_date":
+                result["payment_date"] = value
+
+            elif field_name == "payment_amount":
+                result["payment_amount"] = float(value) if value is not None and value != '' else 0.0
+
+            elif field_name == "claim_payment":
+                result["claim_payment"] = value
+
+            elif field_name == "claim_number":
+                result["claim_number"] = value
+            
+            elif field_name == "patient_name":
+                result["patient_name"] = value
+            
+            elif field_name == "payee_name":
+                result["payee_name"] = value
+
+            elif field_name == "payment":
+                # print( "value payment:", value)
+                # print( "type payment:", type(value))
+                # print( "s1:", int(float(value)))
+                # print( "s2:", str(int(float(value))))
+                result["payment"] = int(float(value)) if value is not None and value != '' else 0
+
+
+
+            elif field_name == "claim_payment":
+                result["claim_payment"] = int(float(value)) if value is not None and value != '' else 0
+            
+            elif field_name == "total_paid":
+                result["total_paid"] = int(float(value)) if value is not None and value != '' else 0
+
+            elif field_name == "adj_amount":
+                result["adj_amount"] = int(float(value)) if value is not None and value != '' else 0
+
+            elif field_name == "claim_status_code":
+                result["claim_status_code"] = value
+
+            elif field_name == "dates_of_service":
+                result["dates_of_service"] = value
+
+            elif field_name == "claim_payment":
+                result["claim_confidence"] = str(int(confidence))
+
+            elif field_name == "procedure_code":
+                result["procedure_code"] = value
+
+            elif field_name == "dates_of_service":
+                result["dates_of_service"] = value
+            
+            elif field_name == "units":
+                result["units"] = value
+                
+            elif field_name == "patient_id":
+                result["patient_id"] = value
+
+
+            result["overall_confidence"] = ""
+            result["payer_confidence"] = ""
+            result["claim_confidence"] = ""
+            result["section"] =  data 
+
+    return result
+
+
 def flatten_claims(extracted: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Flatten AI-extracted claims with payer info and confidence scores.
     """
+    print("=================================== enter in flatter claims")
     flat = []
-    if not extracted or "claims" not in extracted:
-        return flat
+    # if not extracted or "claims" not in extracted:
+    #     return flat
     
-    payer_info = extracted.get("payer_info", {})
-    payment_info = extracted.get("payment", {})
-    overall_confidence = extracted.get("confidence", 0)
+    # for section in extracted.get("sections"):
+    #     key = section.get("file_payment_information")
+    #     print( "key:", key)
+
+
+    # payment_info_fields = extracted["sections"][0]["fields"]
+    # claim_info_fields = extracted["sections"][1]["fields"]
+    # serviceline_info_fields = extracted["sections"][2]["fields"]
+
+    # for i in payment_info_fields:
+    #     print( "payment_info_field:", i)
+
+    # for i in claim_info_fields:
+    #     print( "claim_info_field:", i)
+
+    # for i in serviceline_info_fields:
+    #     print( "serviceline_info_field:", i)
+
+    # payer_info = extracted.get("fields", {})
+    # payment_info = extracted.get("payment", {})
+    # overall_confidence = extracted.get("confidence", 0)
     
-    for claim in extracted.get("claims", []):
-        flat_claim = {
-            "payer_name": payer_info.get("name", "Unknown Payer"),
-            "payer_code": payer_info.get("code"),
-            "payment_reference": payment_info.get("payment_reference"),
-            "payment_date": payment_info.get("payment_date"),
-            "payment_amount": payment_info.get("payment_amount", 0),
-            "overall_confidence": overall_confidence,
-            "payer_confidence": payer_info.get("confidence", 0),
-            "claim_confidence": claim.get("confidence", 0),
-            **claim
-        }
-        flat.append(flat_claim)
+    # for claim in extracted.get("claims", []):
+    #     flat_claim = {
+    #         "payer_name": payer_info.get("name", "Unknown Payer"),
+    #         "payer_code": payer_info.get("code"),
+    #         "payment_reference": payment_info.get("payment_reference"),
+    #         "payment_date": payment_info.get("payment_date"),
+    #         "payment_amount": payment_info.get("payment_amount", 0),
+    #         "overall_confidence": overall_confidence,
+    #         "payer_confidence": payer_info.get("confidence", 0),
+    #         "claim_confidence": claim.get("confidence", 0),
+    #         **claim
+    #     }
+    #     flat.append(flat_claim)
+
+    # flat = extract_payment_fields(extracted)
+
     
     return flat

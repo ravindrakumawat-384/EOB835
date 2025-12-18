@@ -43,7 +43,6 @@ async def read_general_settings(user: Dict[str, Any] = Depends(get_current_user)
         user_id = user.get("id")
         print("User ID:", user_id)
         logger.info("Fetching general settings for user")        
-        # user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
         logger.debug(f"User ID: {user_id}")
         
         time_zone = "pt"  # Default time zone

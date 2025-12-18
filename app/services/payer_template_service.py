@@ -41,7 +41,6 @@ def check_template_match(payer_id: str, claim_keys: List[str]) -> Optional[str]:
     """
     conn = get_pg_conn()
     cur = conn.cursor()
-    
     # Get latest template for payer
     cur.execute("""
         SELECT t.id, tv.mongo_doc_id 
@@ -51,17 +50,32 @@ def check_template_match(payer_id: str, claim_keys: List[str]) -> Optional[str]:
         ORDER BY tv.created_at DESC
         LIMIT 1
     """, (payer_id,))
-    
     result = cur.fetchone()
+    if not result:
+        cur.close()
+        conn.close()
+        return 'no_template'
+    template_id, mongo_doc_id = result
+    # Try to get template dynamic keys from MongoDB
+    from app.common.db.db import init_db
+    DB = init_db()
+    template_doc = DB['template_builder_sessions'].find_one({'_id': mongo_doc_id})
+    template_keys = template_doc.get('dynamic_keys', []) if template_doc else []
     cur.close()
     conn.close()
-    
-    if not result:
+    # Compare keys
+    if not template_keys:
         return 'no_template'
-    
-    # TODO: Compare claim_keys with template fields from MongoDB
-    # For now, simulate template matching
-    return 'matched'  # or 'mismatch' based on actual comparison
+    extracted_set = set([k.lower() for k in claim_keys if k])
+    template_set = set([k.lower() for k in template_keys if k])
+    if not extracted_set:
+        return 'mismatch'
+    matched = extracted_set.intersection(template_set)
+    frac = len(matched) / max(1, len(template_set))
+    if frac >= 0.6:
+        return 'matched'
+    else:
+        return 'mismatch'
 
 
 def find_payer_by_name(payer_name: str, org_id: str) -> Optional[str]:
@@ -196,7 +210,7 @@ Consider synonyms and common variations. Be conservative. Provide confidence as 
     except Exception as e:
         return {"match": False, "confidence": None, "reason": f"ai_error:{e}"}
 
-def store_claims_in_postgres(file_id: str, flat_claims: List[Dict[str, Any]], org_id: str) -> List[str]:
+def store_claims_in_postgres(file_id: str, flat_claims: List[Dict[str, Any]], org_id: str, payer_id: str, payer_name: str) -> List[str]:
     """
     Store EACH claim as a SEPARATE record in PostgreSQL claims table.
     Each claim from the same payer gets its own database entry.
@@ -214,78 +228,96 @@ def store_claims_in_postgres(file_id: str, flat_claims: List[Dict[str, Any]], or
         logger.info(f"📋 Storing {len(flat_claims)} claims as SEPARATE records...")
         
         # Process EACH claim individually - no grouping by payer
-        for i, claim in enumerate(flat_claims, 1):
-            logger.info(f"Processing claim {i}/{len(flat_claims)}: {claim.get('claim_number', 'N/A')}")
+        # for i, claim in enumerate(flat_claims, 1):
+
+        print("flat_claims", flat_claims)
+        # for i, claim in enumerate(flat_claims):
+        # for i, claim in enumerate(flat_claims):
+            # logger.info(f"Processing claim {i}/{len(flat_claims)}: {claim.get('claim_number', 'N/A')}")
             
             # Get or create payer for this claim
-            payer_name = claim.get('payer_name', 'Unknown')
-            payer_id = get_or_create_payer(payer_name, org_id)
+            # print("i:", i)
+            # print("claim:", claim)
+            # payer_name = claim.get('payer_name', 'Unknown')
+            # payer_id = get_or_create_payer(payer_name, org_id)
+
+        payer_name = payer_name
+        payer_id = payer_id
+        print("payer_id=====", payer_id)
             
-            # Create SEPARATE payment record for EACH claim
-            payment_id = str(uuid.uuid4())
-            payment_ref = claim.get('payment_reference') or f"PAY-{claim.get('claim_number', i)}"
-            claim_amount = claim.get('total_paid_amount', 0) or claim.get('payment_amount', 0)
+        # Create SEPARATE payment record for EACH claim
+        payment_id = str(uuid.uuid4())
+        payment_ref = flat_claims["payment_reference"]
+        claim_amount = flat_claims["claim_payment"]
             
-            cur.execute("""
-                INSERT INTO payments (
-                    id, org_id, file_id, payer_id, payment_reference,
-                    payment_date, payment_amount, currency, status, created_at, updated_at
-                ) VALUES (%s, %s, %s, %s, %s, NOW(), %s, %s, %s, NOW(), NOW())
-            """, (
-                payment_id, org_id, file_id, payer_id, payment_ref,
-                claim_amount, 'USD', 'extracted'
-            ))
-            
-            # Create SEPARATE claim record
-            claim_id = str(uuid.uuid4())
-            cur.execute("""
-                INSERT INTO claims (
-                    id, payment_id, file_id, claim_number, patient_name, member_id, provider_name,
-                    total_billed_amount, total_allowed_amount, total_paid_amount, total_adjustment_amount,
-                    claim_status_code, service_date_from, service_date_to, validation_score, 
-                    status, created_at, updated_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
-            """, (
-                claim_id, payment_id, file_id, 
-                claim.get('claim_number', f'CLAIM-{i}'), 
-                claim.get('patient_name', 'Unknown Patient'),
-                claim.get('member_id'),
-                claim.get('provider_name'),
-                claim.get('total_billed_amount', 0),
-                claim.get('total_allowed_amount', 0),
-                claim.get('total_paid_amount', 0),
-                claim.get('total_adjustment_amount', 0),
-                claim.get('claim_status_code', '1'),
-                claim.get('service_date_from'),
-                claim.get('service_date_to'),
-                claim.get('claim_confidence', 0),  # Store AI confidence as validation_score
-                'extracted'
-            ))
-            
-            # Store service lines for this claim
-            service_lines = claim.get('service_lines', [])
-            for j, line in enumerate(service_lines, 1):
-                service_line_id = str(uuid.uuid4())
-                cur.execute("""
-                    INSERT INTO service_lines (
-                        id, claim_id, line_number, cpt_code,
-                        dos_from, dos_to, billed_amount, allowed_amount, paid_amount,
-                        units, created_at, updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
-                """, (
-                    service_line_id, claim_id, j,
-                    line.get('cpt_code'),
-                    line.get('dos_from'),
-                    line.get('dos_to'),
-                    line.get('billed_amount', 0),
-                    line.get('allowed_amount', 0),
-                    line.get('paid_amount', 0),
-                    line.get('units', 1)
-                ))
-            
-            claim_ids.append(claim_id)
-            logger.info(f"✅ Stored claim '{claim.get('claim_number')}' as separate record (ID: {claim_id})")
+        cur.execute("""
+            INSERT INTO payments (
+                id, org_id, file_id, payer_id, payment_reference,
+                payment_date, payment_amount, currency, status, created_at, updated_at
+            ) VALUES (%s, %s, %s, %s, %s, NOW(), %s, %s, %s, NOW(), NOW())
+        """, (
+            payment_id, org_id, file_id, payer_id, payment_ref,
+            claim_amount, 'USD', 'extracted'
+        ))
         
+        # Create SEPARATE claim record
+        claim_id = str(uuid.uuid4())
+        cur.execute("""
+            INSERT INTO claims (
+                id, payment_id, file_id, claim_number, patient_name, member_id, provider_name,
+                total_billed_amount, total_allowed_amount, total_paid_amount, total_adjustment_amount,
+                claim_status_code, service_date_from, service_date_to, validation_score, 
+                status, created_at, updated_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+        """, (
+            claim_id, payment_id, file_id, 
+
+            flat_claims["claim_number"],
+            flat_claims["patient_name"],
+            flat_claims["patient_id"],
+            payer_name,
+            flat_claims["payment"],
+            flat_claims["claim_payment"],
+            flat_claims["total_paid"],
+            flat_claims["adj_amount"], 
+            flat_claims["claim_status_code"],
+            flat_claims["dates_of_service"],
+            flat_claims["dates_of_service"],
+            90,  # Store AI confidence as validation_score
+            'extracted'
+
+        ))
+        
+        # Store service lines for this claim
+        # service_lines = claim.get('service_lines', [])
+        # for j, line in enumerate(service_lines, 1):
+        service_line_id = str(uuid.uuid4())
+        cur.execute("""
+            INSERT INTO service_lines (
+                id, claim_id, line_number, cpt_code,
+                dos_from, dos_to, billed_amount, allowed_amount, paid_amount,
+                units, created_at, updated_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+        """, (
+            # service_line_id, claim_id, j,
+            service_line_id, claim_id,
+            1,
+            flat_claims["procedure_code"],
+            flat_claims["dates_of_service"],
+            flat_claims["dates_of_service"],
+            flat_claims["payment"],
+            flat_claims["claim_payment"],
+            flat_claims["payment"],
+            flat_claims["units"]
+        ))
+        
+        claim_ids.append(claim_id)
+        # logger.info(f"✅ Stored claim '{claim.get('claim_number')}' as separate record (ID: {claim_id})")
+    
+
+
+
+
         conn.commit()
         logger.info(f"✅ Successfully stored {len(claim_ids)} SEPARATE claims in PostgreSQL")
         
