@@ -204,9 +204,12 @@ def extract_and_save_payer_data(json_data: dict, org_id: str, filename: str = No
 def create_template_in_postgres(
     name: str,
     filename: str,
+    # template_path: str,
     org_id: str = "9ac493f7-cc6a-4d7d-8646-affb00ed58da",
     payer_id: str = payer_ids,  # Default payer_id
-    template_type: str = "other"
+    template_type: str = "other",
+    template_path: str = None,
+    
 ) -> str:
     """
     Create a new template record in the templates table.
@@ -223,8 +226,8 @@ def create_template_in_postgres(
         
         cur.execute("""
             INSERT INTO templates (
-                id, name, type, status, org_id, payer_id, created_by, created_at, updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                id, name, type, status, org_id, payer_id, created_by, created_at, updated_at, template_path
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             template_id,
             name,
@@ -234,7 +237,8 @@ def create_template_in_postgres(
             payer_id,
             created_by,
             datetime.utcnow(),
-            datetime.utcnow()
+            datetime.utcnow(),
+            template_path
         ))
         
         conn.commit()
@@ -277,6 +281,20 @@ def create_template_version(
         
         version_number = cur.fetchone()[0]
         
+        # Extract flat key names from sections structure for notes
+        flat_key_names = []
+        if isinstance(dynamic_keys, list) and len(dynamic_keys) > 0:
+            if isinstance(dynamic_keys[0], dict):  # Section-based format
+                for section in dynamic_keys:
+                    if isinstance(section, dict) and "fields" in section:
+                        for field in section.get("fields", []):
+                            if isinstance(field, dict) and "field" in field:
+                                flat_key_names.append(field["field"])
+            else:  # Legacy flat list format
+                flat_key_names = [str(k) for k in dynamic_keys if k]
+        
+        keys_str = ', '.join(flat_key_names[:10]) if flat_key_names else "none"
+        
         cur.execute("""
             INSERT INTO template_versions (
                 id, template_id, version_number, status, ai_generated, ai_model_name, mongo_doc_id, notes, created_by, created_at
@@ -289,7 +307,7 @@ def create_template_version(
             True,
             ai_model_name,
             mongo_doc_id,
-            f"{notes}. Dynamic keys: {', '.join(dynamic_keys[:10])}",
+            f"{notes}. Dynamic keys: {keys_str}",
             created_by,
             datetime.utcnow()
         ))
@@ -321,7 +339,7 @@ def save_template_data(
     dynamic_keys: List[str],
     file_size: int,
     mime_type: str,
-    ai_confidence: int = 85
+    ai_confidence: int = 85,
 ) -> dict:
     """Save template processing results to database using existing schema."""
     

@@ -9,13 +9,16 @@ import datetime
 from app.common.db.review_listing_schema import *
 from ..services.pg_upload_files import get_pg_conn
 from pydantic import BaseModel
+from app.common.db.db import init_db
 
+DB = init_db()
 logger = get_logger(__name__)
 
 
 class UpdateReviewerRequest(BaseModel):
     file_id: str
     reviewer_id: str
+    claim_id: str
 
 class UpdateReviewerResponse(BaseModel):
     status: int
@@ -76,220 +79,223 @@ async def review_queue(
     page: int = Query(1, ge=1),
     page_size: int = Query(6, ge=1, le=1000),
 ):
-    # try:
-    pg = get_pg_conn()
+    try:
+        pg = get_pg_conn()
 
-    if status == "pending":
-        status = "pending_review"
+        if status == "pending":
+            status = "pending_review"
 
-    #=============Payer name================
-    cur_opts1 = pg.cursor()
-    cur_opts1.execute(
-    """
-    SELECT id::text, name
-    FROM payers
-    WHERE org_id = %s
-    ORDER BY name
-    """,
-    (org_id,)
-    )
-    payers = cur_opts1.fetchall()
-
-    # optional: convert to list of dicts
-    payer_list = [{"label": "All Payers", "value": "all"}] + [
-    {"label": row[1], "value": row[1]} for row in payers
-]
-
-    # ---------------------------
-    # REVIEWER OPTIONS
-    # ---------------------------
-    cur_opts2 = pg.cursor()
-    cur_opts2.execute(
+        #=============Payer name================
+        cur_opts1 = pg.cursor()
+        cur_opts1.execute(
         """
-        SELECT DISTINCT u.id::text, u.full_name
-        FROM organization_memberships m
-        JOIN users u ON u.id = m.user_id
-        WHERE m.org_id = %s
-        ORDER BY u.full_name
+        SELECT id::text, name
+        FROM payers
+        WHERE org_id = %s
+        ORDER BY name
         """,
-        (org_id,),
-    )
-    reviewer_rows = cur_opts2.fetchall()
-    cur_opts2.close()
-
-    reviewer_options = [{"label": "Unassigned", "value": "unassigned"}] + [
-        {"label": r[1], "value": r[0]} for r in reviewer_rows if r[1]
-    ]
-
-    table_headers = [
-        {"field": "fileName", "label": "File"},
-        {"field": "payer", "label": "Payer"},
-        {"field": "confidence", "label": "Confidence"},
-        {"field": "status", "label": "Status"},
-        {
-            "field": "reviewer",
-            "label": "Reviewer",
-            "editable": {
-                "type": "dropdown",
-                "placeholder": "Select Reviewer",
-                "options": reviewer_options,
-            },
-        },
-        {"field": "uploaded", "label": "Uploaded"},
-        {
-            "label": "Actions",
-            "actions": [
-                {
-                    "type": "view",
-                    "icon": "pi pi-eye",
-                    "styleClass": "p-button-text p-button-sm",
-                }
-            ],
-        },
-    ]
-
-    # ---------------------------
-    # POSTGRES (NO PAGINATION HERE)
-    # ---------------------------
-    where = ["uf.org_id = %s"]
-    params = [org_id]
-
-    if status != "all":
-        where.append("uf.processing_status ILIKE %s")
-        params.append(status)
-
-    if payer != "all":
-        where.append("p.name ILIKE %s")
-        params.append(f"%{payer}%")
-
-    if search:
-        q = f"%{search}%"
-        where.append(
-            """
-            (
-                uf.original_filename ILIKE %s OR
-                p.name ILIKE %s OR
-                uf.processing_status ILIKE %s OR
-                u.full_name ILIKE %s
-            )
-            """
+        (org_id,)
         )
-        params.extend([q, q, q, q])
+        payers = cur_opts1.fetchall()
 
-    where_sql = " AND ".join(where)
+        # optional: convert to list of dicts
+        payer_list = [{"label": "All Payers", "value": "all"}] + [
+        {"label": row[1], "value": row[1]} for row in payers
+    ]
 
-    cur = pg.cursor()
-    cur.execute(
-        f"""
-        SELECT
-            uf.id::text,
-            uf.original_filename,
-            p.name,
-            uf.processing_status,
-            uf.reviwer_id,
-            uf.uploaded_at
-        FROM upload_files uf
-        LEFT JOIN payers p ON p.id = uf.detected_payer_id
-        LEFT JOIN users u ON u.id = uf.uploaded_by
-        WHERE {where_sql}
-        ORDER BY uf.uploaded_at DESC
-        """,
-        params,
-    )
-    pg_rows = cur.fetchall()
-    cur.close()
+        # ---------------------------
+        # REVIEWER OPTIONS
+        # ---------------------------
+        cur_opts2 = pg.cursor()
+        cur_opts2.execute(
+            """
+            SELECT DISTINCT u.id::text, u.full_name
+            FROM organization_memberships m
+            JOIN users u ON u.id = m.user_id
+            WHERE m.org_id = %s
+            ORDER BY u.full_name
+            """,
+            (org_id,),
+        )
+        reviewer_rows = cur_opts2.fetchall()
+        cur_opts2.close()
 
-    if not pg_rows:
+        reviewer_options = [{"label": "Unassigned", "value": "unassigned"}] + [
+            {"label": r[1], "value": r[0]} for r in reviewer_rows if r[1]
+        ]
+
+        table_headers = [
+            {"field": "fileName", "label": "File"},
+            {"field": "payer", "label": "Payer"},
+            {"field": "confidence", "label": "Confidence"},
+            {"field": "status", "label": "Status"},
+            {
+                "field": "reviewer",
+                "label": "Reviewer",
+                "editable": {
+                    "type": "dropdown",
+                    "placeholder": "Select Reviewer",
+                    "options": reviewer_options,
+                },
+            },
+            {"field": "uploaded", "label": "Uploaded"},
+            {
+                "label": "Actions",
+                "actions": [
+                    {
+                        "type": "view",
+                        "icon": "pi pi-eye",
+                        "styleClass": "p-button-text p-button-sm",
+                    }
+                ],
+            },
+        ]
+
+        # ---------------------------
+        # POSTGRES (NO PAGINATION HERE)
+        # ---------------------------
+        where = ["uf.org_id = %s"]
+        params = [org_id]
+
+        if status != "all":
+            where.append("uf.processing_status ILIKE %s")
+            params.append(status)
+
+        if payer != "all":
+            where.append("p.name ILIKE %s")
+            params.append(f"%{payer}%")
+
+        if search:
+            q = f"%{search}%"
+            where.append(
+                """
+                (
+                    uf.original_filename ILIKE %s OR
+                    p.name ILIKE %s OR
+                    uf.processing_status ILIKE %s OR
+                    u.full_name ILIKE %s
+                )
+                """
+            )
+            params.extend([q, q, q, q])
+
+        where_sql = " AND ".join(where)
+
+        cur = pg.cursor()
+        cur.execute(
+            f"""
+            SELECT
+                uf.id::text,
+                uf.original_filename,
+                p.name,
+                uf.processing_status,
+                uf.reviwer_id,
+                uf.uploaded_at
+            FROM upload_files uf
+            LEFT JOIN payers p ON p.id = uf.detected_payer_id
+            LEFT JOIN users u ON u.id = uf.uploaded_by
+            WHERE {where_sql}
+            ORDER BY uf.uploaded_at DESC
+            """,
+            params,
+        )
+        pg_rows = cur.fetchall()
+        cur.close()
+
+        if not pg_rows:
+            return {
+                "success": True,
+                "tableData": {
+                    "tableHeaders": table_headers,
+                    "tableData": [],
+                    "pagination": {"total": 0, "page": page, "page_size": page_size},
+                    "total_records": 0,
+                },
+            }
+
+        # ---------------------------
+        # MONGO EXTRACTIONS
+        # ---------------------------
+        mongo_file_ids = [r[0] for r in pg_rows]
+
+        mongo_docs = await db_module.db["extraction_results"].find(
+            {"fileId": {"$in": mongo_file_ids}}
+        ).to_list(length=None)
+
+        extraction_map = {}
+        for d in mongo_docs:
+            fid = d["fileId"].replace("store", "")
+            extraction_map.setdefault(fid, []).append(d)
+
+        # ---------------------------
+        # BUILD ALL ROWS FIRST
+        # ---------------------------
+        table_rows = []
+
+        for r in pg_rows:
+            file_id, filename, payer_name, status_val, reviewer_id, uploaded_at = r
+            extractions = extraction_map.get(file_id, [])
+
+            for ext in extractions:
+                conf_val = float(ext.get("aiConfidence") or 0)
+
+                if confidence_cat != "all":
+                    if confidence_cat == "high" and conf_val < 90:
+                        continue
+                    if confidence_cat == "medium" and not (80 <= conf_val < 90):
+                        continue
+                    if confidence_cat == "low" and conf_val >= 80:
+                        continue
+                claim_line_id = ext.get("_id", "")
+                status = ext.get("status", "")
+                reviewer_ids = ext.get("reviewerId", None)
+           
+                table_rows.append(
+                    {
+                        "file_id": file_id,
+                        "claim_id": claim_line_id, 
+                        "fileName": filename,
+                        "payer": ext.get("payerName") or payer_name or "Unknown",
+                        "confidence": f"{int(conf_val)}%",
+                        "status": status,
+                        "reviewer": reviewer_ids or "Unassigned",
+                        "uploaded": uploaded_at.strftime("%Y-%m-%d"),
+                    }
+                )
+
+        # ---------------------------
+        # ✅ FIXED PAGINATION (ONLY CHANGE)
+        # ---------------------------
+        total_records = len(table_rows)
+
+        total_pages = (total_records + page_size - 1) // page_size
+        if page > total_pages and total_pages > 0:
+            page = total_pages
+
+        start = (page - 1) * page_size
+        end = start + page_size
+        paginated_rows = table_rows[start:end]
+
         return {
-            "success": True,
+            "message": "Review queue data fetched successfully.",
             "tableData": {
                 "tableHeaders": table_headers,
-                "tableData": [],
-                "pagination": {"total": 0, "page": page, "page_size": page_size},
-                "total_records": 0,
+                "tableData": paginated_rows,
+                "pagination": {
+                    "total": total_records,
+                    "page": page,
+                    "page_size": page_size,
+                },
+                "total_records": total_records,
             },
+            "payer_list": payer_list
         }
 
-    # ---------------------------
-    # MONGO EXTRACTIONS
-    # ---------------------------
-    mongo_file_ids = [r[0] for r in pg_rows]
-
-    mongo_docs = await db_module.db["extraction_results"].find(
-        {"fileId": {"$in": mongo_file_ids}}
-    ).to_list(length=None)
-
-    extraction_map = {}
-    for d in mongo_docs:
-        fid = d["fileId"].replace("store", "")
-        extraction_map.setdefault(fid, []).append(d)
-
-    # ---------------------------
-    # BUILD ALL ROWS FIRST
-    # ---------------------------
-    table_rows = []
-
-    for r in pg_rows:
-        file_id, filename, payer_name, status_val, reviewer_id, uploaded_at = r
-        extractions = extraction_map.get(file_id, [])
-
-        for ext in extractions:
-            conf_val = float(ext.get("totalExtractedAmount") or 0)
-
-            if confidence_cat != "all":
-                if confidence_cat == "high" and conf_val < 90:
-                    continue
-                if confidence_cat == "medium" and not (80 <= conf_val < 90):
-                    continue
-                if confidence_cat == "low" and conf_val >= 80:
-                    continue
-
-            table_rows.append(
-                {
-                    "fileName": filename,
-                    "payer": ext.get("payerName") or payer_name or "Unknown",
-                    "confidence": f"{int(conf_val)}%",
-                    "status": status_val,
-                    "reviewer": reviewer_id or "Unassigned",
-                    "uploaded": uploaded_at.strftime("%Y-%m-%d"),
-                }
-            )
-
-    # ---------------------------
-    # ✅ FIXED PAGINATION (ONLY CHANGE)
-    # ---------------------------
-    total_records = len(table_rows)
-
-    total_pages = (total_records + page_size - 1) // page_size
-    if page > total_pages and total_pages > 0:
-        page = total_pages
-
-    start = (page - 1) * page_size
-    end = start + page_size
-    paginated_rows = table_rows[start:end]
-
-    return {
-        "message": "Review queue data fetched successfully.",
-        "tableData": {
-            "tableHeaders": table_headers,
-            "tableData": paginated_rows,
-            "pagination": {
-                "total": total_records,
-                "page": page,
-                "page_size": page_size,
-            },
-            "total_records": total_records,
-        },
-        "payer_list": payer_list
-    }
-
-    # except Exception:
-    #     raise HTTPException(
-    #         status_code=500,
-    #         detail="Something went wrong while fetching review queue data",
-    #     )
-
-
+    except Exception:
+        raise HTTPException(
+            status_code=500,
+            detail="Something went wrong while fetching review queue data",
+        )
 
 
 @router.patch("/update_reviewer", response_model=UpdateReviewerResponse)
@@ -297,15 +303,33 @@ async def update_reviewer(payload: UpdateReviewerRequest):
     conn = get_pg_conn()
     cur = conn.cursor()
     try:
-        cur.execute(
-            """
-            UPDATE upload_files
-            SET reviwer_id = %s
-            WHERE id = %s
-            """,
-            (payload.reviewer_id, payload.file_id),
+        collection = DB["extraction_results"]
+        claim_version = DB["claim_version"] 
+        
+        collection.update_one(
+            {
+                "_id": payload.claim_id,
+                "fileId": payload.file_id
+            },
+            {
+                "$set": {
+                    "reviewerId": payload.reviewer_id
+                }
+            }
         )
-        conn.commit()
+
+        claim_version.update_one(
+            {
+                "extraction_id": payload.claim_id,
+                "file_id": payload.file_id
+            },
+            {
+                "$set": {
+                    "updated_by": payload.reviewer_id,
+                    "updated_at": datetime.datetime.utcnow()
+                }
+            }
+        )   
 
         return UpdateReviewerResponse(
             status=200,

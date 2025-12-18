@@ -70,15 +70,40 @@ async def dashboard_summary() -> JSONResponse:
         cur.execute("SELECT COUNT(*) FROM upload_files WHERE org_id = %s", (org_id,))
         pg_uploaded = cur.fetchone()[0]
        
-        cur.execute("""
-            SELECT COUNT(*) 
-            FROM upload_files 
-            WHERE org_id = %s 
-            AND processing_status IN ('pending_review', 'completed', 'Ai-Process')
-        """, (org_id,))
-        count_processed = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM upload_files WHERE org_id = %s AND processing_status = 'pending_review'", (org_id,))
-        pg_pending_review = cur.fetchone()[0]
+        # Get count from MongoDB extraction_results collection based on status
+        try:
+            extraction_col = db_module.db["extraction_results"]
+            
+            # Get file_ids for this org from PostgreSQL
+            cur.execute("SELECT id FROM upload_files WHERE org_id = %s", (org_id,))
+            file_rows = cur.fetchall()
+            org_file_ids = [str(r[0]) for r in file_rows] if file_rows else []
+            
+            if org_file_ids:
+                # Count documents with status in ('pending_review', 'completed', 'Ai-Process')
+                count_processed = await extraction_col.count_documents({
+                    "fileId": {"$in": org_file_ids},
+                    "status": {"$in": ['pending_review', 'completed', 'Ai-Process']}
+                })
+            else:
+                count_processed = 0
+        except Exception as e:
+            logger.warning(f"MongoDB processed count failed: {e}")
+            count_processed = 0
+        
+        # Get pending_review count from MongoDB extraction_results collection
+        try:
+            if org_file_ids:
+                # Count documents with status 'pending_review'
+                pg_pending_review = await extraction_col.count_documents({
+                    "fileId": {"$in": org_file_ids},
+                    "status": "pending_review"
+                })
+            else:
+                pg_pending_review = 0
+        except Exception as e:
+            logger.warning(f"MongoDB pending_review count failed: {e}")
+            pg_pending_review = 0
         
         cur.execute("""
             SELECT COUNT(*)
