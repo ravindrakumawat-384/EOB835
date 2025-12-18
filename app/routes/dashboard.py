@@ -137,15 +137,15 @@ async def dashboard_summary() -> JSONResponse:
                     docs = extraction_col.find(
                         {
                             "fileId": {"$in": chunk},
-                            "totalExtractedAmount": {"$ne": None}
+                            "aiConfidence": {"$ne": None}
                         },
-                        {"totalExtractedAmount": 1}
+                        {"aiConfidence": 1}
                     )
 
                     results = await docs.to_list(length=500)
                     for d in results:
                         try:
-                            ai_values.append(d["totalExtractedAmount"])
+                            ai_values.append(d["aiConfidence"])
                         except:
                             pass
 

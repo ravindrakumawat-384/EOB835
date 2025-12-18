@@ -5,6 +5,8 @@ from jose import jwt, JWSError
 from ..common.config import settings
 from uuid import uuid4
 from ..services.email_service import send_reset_email
+from jose import JWTError, ExpiredSignatureError
+
 
 _pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -20,6 +22,15 @@ def verify_password(plain: str, hashed: str) -> bool:
 def _now() -> datetime:
     return datetime.utcnow()
 
+
+# Token blocklist (in-memory for now)
+# _token_blocklist = set()
+
+# def block_token(token: str):
+#     _token_blocklist.add(token)
+
+# def is_token_blocked(token: str) -> bool:
+#     return token in _token_blocklist
 
 def create_access_token(subject: str, extra: Dict[str, Any] | None = None) -> str:
     """
@@ -101,7 +112,31 @@ def create_reset_token(subject: str, email) -> str:
 
 
 def decode_token(token: str) -> Dict[str, Any]:
-    print("Enter in Decoding token:") 
-    print("Enter in Decoding token:", token) 
+    print("Enter in Decoding token:")
+    print("Enter in Decoding token:", token)
     print("Return decode token===> ")
-    return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+    try:
+        # Decode while verifying signature but not exp; we'll enforce exp with 60s leeway manually
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET,
+            algorithms=[settings.JWT_ALGORITHM],
+            options={"verify_aud": False, "verify_exp": False},
+        )
+        # Manual expiration check with 60s grace period
+        exp = payload.get("exp")
+        if exp is not None:
+            now = int(datetime.utcnow().timestamp())
+            if now > int(exp) + 60:
+                print("Token expired (beyond leeway)")
+                raise ExpiredSignatureError("Token expired")
+        return payload
+    except ExpiredSignatureError:
+        print("Token expired")
+        raise JWTError("Token expired")
+    except JWTError:
+        print("Token decoding failed (invalid)")
+        raise JWTError("Invalid token")
+    except Exception as e:
+        print("Token decoding failed (unknown error)")
+        raise JWTError("Invalid token")

@@ -48,12 +48,12 @@ class UserDetails(BaseModel):
 #     role: str | None = None
 
 class TokenResponse(BaseModel):
-    msg: str
+    message: str
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
     expires_in: int
-    user: UserDetails | None = None
+    # user: UserDetails | None = None
     # organization: OrganizationDetails | None = None
 
 
@@ -128,7 +128,7 @@ async def login(payload: LoginRequest) -> Any:
     user = await _get_user_by_email(payload.email)
     print("user logged in -----> ", user)
     if not user or not verify_password(payload.password, user["password_hash"]):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials. Please check username and password")
 
     if not user.get("is_active", True):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User inactive")
@@ -185,7 +185,7 @@ async def login(payload: LoginRequest) -> Any:
 
 
     return {
-        "msg": "Login Successful",
+        "message": "Login Successful",
         "access_token": access,
         "refresh_token": refresh,
         "expires_in": expires_in,
@@ -196,29 +196,55 @@ async def login(payload: LoginRequest) -> Any:
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh(payload: RefreshRequest) -> Any:
     try:
-        print()
         print("Enter in Referesh payload----------->", payload)
-        print()
         decoded = decode_token(payload.refresh_token)
         print("decoded", decoded)
         
-    except Exception:
+    # except Exception:z
+    #     raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Refresh token expired")
+    except jwt.JWTError:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
+
 
     if decoded.get("type") != "refresh":
         raise HTTPException(status_code=401, detail="Invalid token type")
 
     jti = decoded.get("jti")
+    print("jti", jti)
+
+    jti = decoded["jti"]
+    print("jti-----> ", jti)
+    user_id = decoded["sub"]
+    print("user_id-----> ", user_id)
+
+    # check refresh token blacklisted
+    # blacklisted = await db_module.db.refresh_token_blacklist.find_one({"jti": jti})
+    # if blacklisted:
+    #     raise HTTPException(status_code=401, detail="Refresh token revoked")
+
+
     # check refresh token exists (rotation / blacklist)
     stored = await db_module.db.refresh_tokens.find_one({"jti": jti})
     print("stored", stored)
     if not stored:
         raise HTTPException(status_code=401, detail="Refresh token revoked or not found")
 
+    # # Blacklist old token
+    # await db_module.db.refresh_token_blacklist.insert_one({
+    #     "jti": jti,
+    #     "revoked_at": datetime.utcnow(),
+    # })
+    
     user_id = decoded.get("sub")
     print(":user_id", user_id)
+
     # rotate: delete old refresh, issue a new one
     await db_module.db.refresh_tokens.delete_one({"jti": jti})
+
+    # Create new refresh token
     new_refresh = create_refresh_token(user_id)
     print("new_refresh", new_refresh)
     new_dec = decode_token(new_refresh)
@@ -231,8 +257,11 @@ async def refresh(payload: RefreshRequest) -> Any:
             "expires_at": datetime.fromtimestamp(new_dec.get("exp")),
         }
     )
+
+    # Create new access token
     access = create_access_token(user_id)
     print("access", access)
+    
     expires_in = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
     print("expires_in",expires_in)
 
@@ -241,7 +270,7 @@ async def refresh(payload: RefreshRequest) -> Any:
         "refresh_token": new_refresh,
         "expires_in": expires_in,
         "token_type": "bearer",
-        "success": "Token refreshed successfully"
+        "msg": "Token refreshed successfully"
         }
 
 
@@ -419,8 +448,8 @@ async def logout(payload: LogoutRequest, request: Request):
 
 # change-password endpoint
 @router.post("/change-password")
-# async def change_password(payload: ChangePasswordRequest, user: dict = Depends(get_current_user)):
-async def change_password(payload: ChangePasswordRequest):
+async def change_password(payload: ChangePasswordRequest, user: dict = Depends(get_current_user)):
+# async def change_password(payload: ChangePasswordRequest):
     """
     Allow authenticated user to change their password.
     Verifies old password, updates to new password, and revokes all refresh tokens for security.
@@ -429,15 +458,15 @@ async def change_password(payload: ChangePasswordRequest):
         # user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
         # user_id = "b6ee4982-b5ec-425f-894d-4324adce0f36" # rv
         # user_id = "b73536ad-eba2-4d48-9306-5e479fbf8058" # rv
-        user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
+        # user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
+        user_id = user.get("id")
+        print("User ID:", user_id)
 
         try:
             user = await _get_user_by_id(user_id)
         except:
             logger.error(f"User not found: {user_id}")
             raise HTTPException(status_code=404, detail="User not found")
-           
-            
         
         # Verify old password
         if not verify_password(payload.old_password, user["password_hash"]):

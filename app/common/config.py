@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
     # Password reset token expiry (minutes)
-    RESET_TOKEN_EXPIRE_MINUTES: int = 30
+    RESET_TOKEN_EXPIRE_MINUTES: int = 300
 
     # Email stub "from"
     DEFAULT_FROM_EMAIL: str = "noreply@eob.example"
