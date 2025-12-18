@@ -282,5 +282,5 @@ async def dashboard_summary() -> JSONResponse:
         return JSONResponse(content=resp_data, status_code=200)
     except Exception as e:
         logger.error("dashboard summary failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Something went wrong while fetching dashboard data.")
+        raise HTTPException(status_code=500, detail="Something went wrong while fetching dashboard data")
 
