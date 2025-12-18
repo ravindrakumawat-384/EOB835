@@ -47,12 +47,13 @@ async def serialize_usr(doc: dict) -> dict:
 
 
 @router.get("/", response_model=Dict[str, Any])
-# async def get_notifications(user: Dict[str, Any] = Depends(get_current_user)):
-async def get_notifications():
+async def get_notifications(user: Dict[str, Any] = Depends(get_current_user)):
+# async def get_notifications():
     try:
         # user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
-        user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
-        
+        # user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
+        user_id = user.get("id")
+        print("User ID:", user_id)        
         logger.info(f"Fetching notification preferences for user_id: {user_id}")
 
         # pref = await get_notification_pref(user_id)
@@ -90,11 +91,13 @@ async def get_notifications():
 
 
 @router.patch("/", response_model=Dict[str, Any])
-# async def upsert_notifications(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
-async def upsert_notifications(payload: Dict[str, Any]):
+async def upsert_notifications(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
+# async def upsert_notifications(payload: Dict[str, Any]):
     try:
         # user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
-        user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
+        # user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
+        user_id = user.get("id")
+        print("User ID:", user_id)
         
         # payload["user_id"] = user_id
 

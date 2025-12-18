@@ -40,8 +40,8 @@ class UpdateProfileRequest(Dict[str, Any]):
 
 
 @router.get("/", response_model=Dict[str, Any])
-# async def get_user_profile(user: Dict[str, Any] = Depends(get_current_user)):
-async def get_user_profile():
+async def get_user_profile(user: Dict[str, Any] = Depends(get_current_user)):
+# async def get_user_profile():
     """
     Get user profile information including:
     - Profile Photo
@@ -53,7 +53,9 @@ async def get_user_profile():
     """
     try:
         # user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
-        user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
+        # user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
+        user_id = user.get("id")
+        print("User ID:", user_id)
 
         print("user_id-----> ", user_id)
         
@@ -117,8 +119,8 @@ async def get_user_profile():
 
 
 @router.patch("/", response_model=Dict[str, Any])
-# async def update_user_profile(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
-async def update_user_profile(payload: Dict[str, Any]):
+async def update_user_profile(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
+# async def update_user_profile(payload: Dict[str, Any]):
     """
     Update user profile information including:
     - Personal Information (first name, last name, phone)
@@ -131,7 +133,9 @@ async def update_user_profile(payload: Dict[str, Any]):
     try:
         print("payload   update_user_profile:", payload)
 
-        user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
+        # user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
+        user_id = user.get("id")
+        print("User ID:", user_id)
         
         # Get user details
         user_data = await db_module.db.users.find_one({"id": user_id})
@@ -209,12 +213,15 @@ async def update_user_profile(payload: Dict[str, Any]):
 # GET API to return the actual uploaded profile image file
 # @router.post("/upload-profile-pic", response_model=Dict[str, Any])
 @router.get("/profile-pic")
-async def get_profile_pic():
+async def get_profile_pic(user: Dict[str, Any] = Depends(get_current_user)):
     """
     Get the actual uploaded profile picture file for the user.
     """
     try:
-        user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4"  # TODO: Replace with Depends(get_current_user)
+        # user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4"  # TODO: Replace with Depends(get_current_user)
+        user_id = user.get("id")
+        print("User ID:", user_id)
+
         user_prof_data = await db_module.db.user_profiles.find_one({"user_id": user_id})
         if not user_prof_data or not user_prof_data.get("profile_pic_path"):
             logger.warning(f"Profile picture not found for user_id: {user_id}")
@@ -245,13 +252,15 @@ async def get_profile_pic():
 # async def update_user_profile(payload: Dict[str, Any]):
 
 @router.post("/upload-profile-pic", response_model=Dict[str, Any])
-async def upload_profile_pic(file: UploadFile = File(...)):
+async def upload_profile_pic(file: UploadFile = File(...), user: Dict[str, Any] = Depends(get_current_user)   ):
     """
     Upload a profile picture for the user. Accepts Angular File object, validates type/size, saves file, updates MongoDB.
     Allowed types: JPG, PNG, GIF. Max size: 2MB.
     """
     try:
-        user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4"  # TODO: Replace with Depends(get_current_user)
+        # user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4"  # TODO: Replace with Depends(get_current_user)
+        user_id = user.get("id")
+        print("User ID:", user_id)
         user_prof_data = await db_module.db.user_profiles.find_one({"user_id": user_id})
         if not user_prof_data:
             logger.warning(f"User not found: {user_id}")
