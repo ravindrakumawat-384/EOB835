@@ -97,12 +97,13 @@ async def serialize_usr(doc: dict) -> UserItem:
 
 
 # -------------------- GET USERS --------------------
-@router.get("/", response_model=UsersResponse)
-async def get_users():
+@router.get("/", response_model=UsersResponse, )
+async def get_users(user: Dict[str, Any] = Depends(get_current_user)):
     try:
         # TODO: Replace with actual logged-in user
-        user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4"
-
+        # user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4"
+        user_id = user.get("id")
+        print("User ID:", user_id)
         org = await db_module.db.organization_memberships.find_one({"user_id": user_id})
         if not org:
             raise HTTPException(status_code=404, detail="Organization not found")
@@ -177,10 +178,11 @@ async def get_users():
 
 # -------------------- ADD USER --------------------
 @router.post("/")
-async def post_user(payload: Dict[str, Any]):
+async def post_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
     try:
-        user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4"  # admin
-
+        user_id = user.get("id")
+        print("User ID:", user_id)
+        
         # find new user
         usr = await db_module.db.users.find_one({"email": payload["email"]}, {"_id": 0})
         if not usr:
@@ -208,7 +210,7 @@ async def post_user(payload: Dict[str, Any]):
 
 
 # -------------------- UPDATE USER --------------------
-@router.patch("/")
+@router.patch("/", dependencies=[Depends(require_role(["Admin"]))])
 async def patch_user(payload: Dict[str, Any]):
     try:
         print()
@@ -228,11 +230,13 @@ async def patch_user(payload: Dict[str, Any]):
 
 # -------------------- DELETE USER --------------------
 @router.delete("/{member_id}")
-async def del_user(member_id: str):
+async def del_user(member_id: str, user: Dict[str, Any] = Depends(get_current_user)):
     try:
-        admin_id = "6f64216e-7fbd-4abc-b676-991a121a95e4"
+        # admin_id = "6f64216e-7fbd-4abc-b676-991a121a95e4"
+        user_id = user.get("id")
+        print("User ID:", user_id)
 
-        org = await db_module.db.organization_memberships.find_one({"user_id": admin_id})
+        org = await db_module.db.organization_memberships.find_one({"user_id": user_id})
         org_id = org.get("org_id")
 
         deleted = await delete_team_member(member_id, org_id)

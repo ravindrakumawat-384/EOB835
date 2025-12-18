@@ -2,6 +2,7 @@ from typing import Any
 from ..common.db.db import db
 import app.common.db.db as db_module
 from app.common.db.db import init_db
+from ..services.auth_deps import get_current_user, require_role
 from ..common.db.models import (
     Organization, User, OrganizationMembership,UserPreferences,
     Notification,EmailEvent, RetentionPolicy)
