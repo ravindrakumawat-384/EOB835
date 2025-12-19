@@ -219,7 +219,12 @@ async def review_queue(
         mongo_file_ids = [r[0] for r in pg_rows]
 
         mongo_docs = await db_module.db["extraction_results"].find(
-            {"fileId": {"$in": mongo_file_ids}}
+            {
+                "fileId": {"$in": mongo_file_ids},
+                "status": {
+                    "$nin": ["exception", "need_template", "assign_payer", "ocr_failed", "generated"]
+                }
+            }
         ).to_list(length=None)
 
         extraction_map = {}
