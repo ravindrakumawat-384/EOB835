@@ -19,7 +19,7 @@ from ..services.auth_deps import get_current_user
 from fastapi import Request
 import bson
 from jose import jwt, JWTError
-
+from typing import Dict, Any
 from app.common.db.db import init_db
 DB = init_db()
 
@@ -53,6 +53,17 @@ class TokenResponse(BaseModel):
     refresh_token: str
     token_type: str = "bearer"
     expires_in: int
+    # user: UserDetails | None = None
+    # organization: OrganizationDetails | None = None
+
+class LoginResponse(BaseModel):
+    message: str
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: Dict[str, Any]
+
     # user: UserDetails | None = None
     # organization: OrganizationDetails | None = None
 
@@ -123,7 +134,7 @@ async def register(payload: RegisterRequest) -> Any:
     return {"message": "user created", "access_token": access, "refresh_token": refresh}
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=LoginResponse)
 async def login(payload: LoginRequest) -> Any:
     user = await _get_user_by_email(payload.email)
     print("user logged in -----> ", user)
@@ -136,7 +147,6 @@ async def login(payload: LoginRequest) -> Any:
     access = create_access_token(user["id"])
     refresh = create_refresh_token(user["id"])
 
-    
     print()
     print("access", access)
     print()
@@ -182,6 +192,8 @@ async def login(payload: LoginRequest) -> Any:
         "org_id": org_id,
         "role": role,
     }
+
+    print("user_details--> ", user_details)
 
 
     return {
