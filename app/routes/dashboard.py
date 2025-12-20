@@ -40,13 +40,14 @@ async def dashboard_summary() -> JSONResponse:
             raise HTTPException(status_code=400, detail="org_id required in user context")
         # MongoDB stats for accuracy from extraction_results collection
         mongo_accuracy_percent = 0.0
+        extraction_col = db_module.db["extraction_results"]
         try:
             # Initialize MongoDB if not already initialized
             if db_module.db is None:
                 db_module.init_db()
             
             if db_module.db is not None:
-                extraction_col = db_module.db["extraction_results"]
+                
                 accuracy_pipeline = [
                     {"$match": {"ai_overall_confidence": {"$ne": None, "$exists": True}}},
                     {"$group": {"_id": None, "avg_confidence": {"$avg": "$ai_overall_confidence"}}}
@@ -72,7 +73,7 @@ async def dashboard_summary() -> JSONResponse:
        
         # Get count from MongoDB extraction_results collection based on status
         try:
-            extraction_col = db_module.db["extraction_results"]
+            # extraction_col = db_module.db["extraction_results"]
             
             # Get file_ids for this org from PostgreSQL
             cur.execute("SELECT id FROM upload_files WHERE org_id = %s", (org_id,))
@@ -83,7 +84,7 @@ async def dashboard_summary() -> JSONResponse:
                 # Count documents with status in ('pending_review', 'completed', 'Ai-Process')
                 count_processed = await extraction_col.count_documents({
                     "fileId": {"$in": org_file_ids},
-                    "status": {"$in": ['pending_review', 'completed', 'Ai-Process']}
+                    "status": {"$in": ['pending_review', 'completed', 'ai-process']}
                 })
             else:
                 count_processed = 0
@@ -105,20 +106,46 @@ async def dashboard_summary() -> JSONResponse:
             logger.warning(f"MongoDB pending_review count failed: {e}")
             pg_pending_review = 0
         
+        try:
+            if org_file_ids:
+                # Count documents with status in ('failed', 'need_template', 'Unreadable', 'exception')
+                exceptions = await extraction_col.count_documents({
+                    "fileId": {"$in": org_file_ids},
+                    "status": {"$in": ['failed', 'need_template', 'unreadable', 'exception']}
+                })
+            else:
+                exceptions = 0
+        except Exception as e:
+            logger.warning(f"MongoDB exceptions count failed: {e}")
+            exceptions = 0
+        
+        try:
+            if org_file_ids:
+                # Count documents with status 'need_template'
+                needs_template = await extraction_col.count_documents({
+                    "fileId": {"$in": org_file_ids},
+                    "status": "need_template"
+                })
+            else:
+                needs_template = 0
+        except Exception as e:
+            logger.warning(f"MongoDB needs_template count failed: {e}")
+            needs_template = 0
+
         cur.execute("""
             SELECT COUNT(*)
             FROM upload_files
             WHERE org_id = %s
-            AND processing_status IN ('failed', 'needs_template', 'Unreadable', 'exception', 'Ai-Prcoess')
+            AND processing_status IN ('failed', 'need_template', 'Unreadable', 'exception')
         """, (org_id,))
         pg_exceptions = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM upload_files WHERE org_id = %s AND processing_status = 'needs_template'", (org_id,))
+
+        cur.execute("SELECT COUNT(*) FROM upload_files WHERE org_id = %s AND processing_status = 'need_template'", (org_id,))
         pg_needs_template = cur.fetchone()[0]
    
 
         mongo_accuracy_percent = 0.0
         try:
-            extraction_col = db_module.db["extraction_results"]
 
             # Step 1 — fetch file_ids for this org from Postgres
             cur.execute("SELECT id FROM upload_files WHERE org_id = %s", (org_id,))
@@ -213,7 +240,7 @@ async def dashboard_summary() -> JSONResponse:
         failed_exports = cur.fetchone()[0]
         # Recent uploads (PostgreSQL) with payer information
         cur.execute("""
-            SELECT uf.original_filename, uf.uploaded_at, uf.processing_status, 
+            SELECT uf.id, uf.original_filename, uf.uploaded_at, uf.processing_status, 
                    p.name as payer_name, uf.ai_payer_confidence, uf.file_size
             FROM upload_files uf
             LEFT JOIN payers p ON uf.detected_payer_id = p.id
@@ -246,11 +273,12 @@ async def dashboard_summary() -> JSONResponse:
         table_rows = []
         for row in pg_recent:
             table_rows.append({
-                "fileName": row[0],
-                "payer": row[3] or "Unknown",
-                "status": row[2],
+                "fileId": str(row[0]),
+                "fileName": row[1],
+                "payer": row[4] or "Unknown",
+                "status": row[3],
                 # "uploaded": humanize(row[1])
-                "uploaded": covert_date_time(row[1])
+                "uploaded": covert_date_time(row[2])
             })
         # MongoDB recent uploads removed - using PostgreSQL data only
         resp_data = {
@@ -259,11 +287,9 @@ async def dashboard_summary() -> JSONResponse:
                 "uploaded": uploaded + pg_uploaded,
                 "processed": count_processed,
                 "pendingReview": pending_review + pg_pending_review,
-                # "accuracyPercent": max(mongo_accuracy_percent, pg_accuracy_percent),  mongo_accuracy_percent
                 "accuracyPercent": mongo_accuracy_percent,
                 "exceptions": exceptions + pg_exceptions,
-                "needsTemplate": needs_template + pg_needs_template,
-                "needsTemplate": total_templates
+                "needsTemplate": needs_template,
             },
             "recentUploadsData": {
                 "total_records": 0,
