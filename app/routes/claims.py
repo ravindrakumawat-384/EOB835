@@ -44,7 +44,6 @@ async def get_claims_detail(claim_id: str) -> Dict[str, Any]:
         extraction_result = await extraction_results.find_one({"_id": claim_id})
         claim_number = extraction_result.get('claimNumber', '')
         status = extraction_result.get('status', '')    
-        print('file_id=====', file_id)
         
         # Ensure file_id is a string, not a dict
         if isinstance(file_id, dict):
@@ -67,7 +66,6 @@ async def get_claims_detail(claim_id: str) -> Dict[str, Any]:
         storage_path = result[1] if result else None
         file_name = result[2] if result else None   
         
-
         cur.close()
         conn.close()
         
@@ -75,8 +73,6 @@ async def get_claims_detail(claim_id: str) -> Dict[str, Any]:
         presigned_url = None
         if storage_path:
             try:
-                
-                
                 # Initialize S3 service
                 s3_service = S3Service(
                     settings.S3_BUCKET,
@@ -85,13 +81,8 @@ async def get_claims_detail(claim_id: str) -> Dict[str, Any]:
                     settings.AWS_REGION
                 )
                 
-                
                 # Generate presigned URL (valid for 5 minutes for better security)
                 presigned_url = s3_service.generate_presigned_url(storage_path, expiration=300)
-                
-                # Fallback: Generate direct S3 URL if bucket is public
-                if not presigned_url:
-                    presigned_url = f"https://{settings.S3_BUCKET}.s3.{settings.AWS_REGION}.amazonaws.com/{s3_key}"
                 
             except Exception as s3_error:
                 logger.error(f"Error generating presigned URL: {str(s3_error)}")
@@ -109,23 +100,6 @@ async def get_claims_detail(claim_id: str) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Database error: {str(e)}")
         raise HTTPException(status_code=500, detail="Something went wrong while fetching claim details.")
-
-
-# def apply_user_updates(claim: Dict[str, Any], updates: Dict[str, Any]) -> Dict[str, Any]:
-#     """
-#     Update only user-provided keys inside claim.sections[].fields[].value
-#     updates example: {"payer_name": "aman"}
-#     """
-#     if not claim or not updates:
-#         return claim
-
-#     for section in claim.get("sections", []):
-#         for field_obj in section.get("fields", []):
-#             field_key = field_obj.get("field")
-#             if field_key in updates:
-#                 field_obj["value"] = updates[field_key]
-
-#     return claim
 
 def flatten_updates(data: Any, out: Dict[str, Any]):
     if isinstance(data, dict):
@@ -170,7 +144,6 @@ async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: s
             "extraction_id": claim_id
         }
         result = await version_collection.find_one(query, sort=[("created_at", 1)])
-        print('result=====', result.get("claim", {}))
         
         # Get latest version for version calculation
         latest_version_doc = await version_collection.find_one(
@@ -189,7 +162,7 @@ async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: s
             minor += 1
             next_version = f"{major}.{minor}"
 
-        if check == "exception":
+        if check == "exception" and result.get("status") != "completed":
             # Update extraction status to 'exception' in extraction_results collection
             await extraction_collection.update_one(
                 {"_id": claim_id},
@@ -203,7 +176,7 @@ async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: s
             return {"message": "Claims are marked as exception successfully.", "status": 200}  
          
         # Handle draft case
-        if check == "draft":
+        elif check == "draft" and result.get("status") != "completed" and result.get("status") != "exception":
             # Insert new version record
             await version_collection.insert_one({
                 "file_id": file_id,
@@ -234,9 +207,8 @@ async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: s
 
             return {"message": "Claims are update successfull.", "status": 200}
         
-        if check == "confirmed":
+        elif check == "confirmed" and result.get("status") != "completed" and result.get("status") != "exception":
             # Update extraction status in extraction_results collection
-            print("under this cindtion")
             await extraction_collection.update_one(
                 {"_id": claim_id},
                 {"$set": {"status": "completed"}}
@@ -251,6 +223,13 @@ async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: s
             "updated_by": updated_by,
             "status": "completed"
             })
+
+            await version_collection.find_one_and_update(
+                query,
+                {"$set": {"status": "completed"}},
+                sort=[("created_at", 1)],
+                return_document=True
+            )
 
             result = await version_collection.find_one(query, sort=[("created_at", 1)])
             predefined_json = result.get("claim", {})
@@ -269,8 +248,6 @@ async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: s
                 sort=[("created_at", 1)],   # first record (earliest)
                 return_document=ReturnDocument.AFTER
                 )
-            
-
             return {"message": "Claims are completed successfull.", "status": 200}
         
         

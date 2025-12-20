@@ -29,17 +29,18 @@ class S3Service:
         """Generate a presigned URL for downloading a file from S3"""
         try:
             parsed = urlparse(s3_key)
-            print('parsed=====', parsed)
             bucket_name = parsed.netloc
-            print('bucket_name=====', bucket_name)
-            object_key = parsed.path.lstrip("/")
-            print('object_key=====', object_key)    
+            file_name = parsed.path.lstrip("/")
             response = self.s3.generate_presigned_url(
                 'get_object',
-                Params={'Bucket': bucket_name, 'Key': object_key},
+                Params={
+                    'Bucket': bucket_name,
+                    'Key': file_name,
+                    "ResponseContentType": "application/pdf"
+                },
                 ExpiresIn=expiration
             )
-            logger.info(f"Generated presigned URL for {s3_key}")
+            logger.info(f"Generated presigned URL for {s3_key}, {response}")
             return response
         except (BotoCoreError, ClientError) as e:
             logger.error(f"Failed to generate presigned URL for {s3_key}: {e}")
