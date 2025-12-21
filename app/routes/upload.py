@@ -120,6 +120,58 @@ async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
 
         raw_text = extract_text_from_file(content, file.filename, mime_type)
         logger.info(f"Extracted text for {file.filename} (first 200 chars): {raw_text[:200]}")
+        
+
+        print()
+        print()
+        print()
+        print()
+        print()
+        print()
+        print("Raw text operation start=======================")
+        print("Raw text operation start=======================")
+        print("Raw text operation start=======================")
+        print()
+        print()
+
+        import re
+        from typing import List
+
+        def split_claim_blocks(raw_text: str) -> List[str]:
+            """
+            Deterministically split raw OCR text into claim-level blocks.
+            """
+            blocks = re.split(
+                r'(?=Patient Name:|CLAIM NO\.|Claim Number:)',
+                raw_text
+            )
+
+            # Remove garbage headers
+            return [b.strip() for b in blocks if len(b.strip()) > 200]
+
+        # print("Splited Raws text========>>  ", split_claim_blocks(raw_text))
+
+
+        print()
+        print()
+        print("Raw text operation End===========================")
+        print("Raw text operation End===========================")
+        print("Raw text operation End===========================")
+        print()
+        print()
+        print()
+        print()
+        print()
+        print()
+
+
+
+
+
+
+
+
+
 
         # Check if any payer name is present in the extracted text
         matched_payer_name = ''
@@ -242,35 +294,68 @@ async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
         print()
 
 
+        claims = []
+        flat_claims_list = []
+        # ai_result = []
+        for claim_text in split_claim_blocks(raw_text):
+            # print("Claim Text for AI extraction:", claim_text)
+            print()
+            claim_json = ai_extract_claims(claim_text,dynamic_key)
+            # print("Extracted Claim JSON:", claim_json)
+            claims.append(claim_json)
 
-        print("AI extraction result start---> ")
-        ai_result = ai_extract_claims(raw_text, dynamic_key)
-        print("AI extraction result:", ai_result)
-        print()
-        # flat_claims = flatten_claims(ai_result)
-        print("Flattened claims start---> ")
-        flat_claims = flatten_claims2(ai_result)
-        print("Flattened claims:", flat_claims)
+            print("Flattened claims start---> ")
+            f_claims = flatten_claims2(claim_json)
+            flat_claims_list.append(f_claims)
+            print("Flattened claims End---> ")
+
         print()
         print()
+        # print("claims==================>>  ", claims)
+        print()
+        print()
+
+
+        # print("Flattened claims start---> ")
+        # for claim in claims:
+        #     print("Individual claim before flattening:", claim)
+        #     print()
+        #     flat_claims = flatten_claims2(claim)
+        #     print("Flattened claims:", flat_claims)
+        #     print()
+        #     print()
+
+
+        
+        # print("AI extraction result start---> ")
+        # ai_result = ai_extract_claims(raw_text, dynamic_key)
+        # print("AI extraction result:", ai_result)
+        # print()
+        # # flat_claims = flatten_claims(ai_result)
+        # print("Flattened claims start---> ")
+        # flat_claims = flatten_claims2(ai_result)
+        # print("Flattened claims:", flat_claims)
+        # print()
+        # print()
 
 
 
         payer_name = None
-        if flat_claims:
+        # if flat_claims:
+        if flat_claims_list:
             payer_name = matched_payer_name
 
 
-        # If uploaded file is JSON, extract payer name and update detected_payer_id
-        if ai_result and isinstance(ai_result, dict):
-            # Try to get payer name from top-level or claims
-            # payer_info = ai_result.get('fields')
-            # print("payer_info:11", payer_info)
-            # payer_info = ai_result.get('fields')[0]
-            # print("payer_info:22", payer_info)
-            # payer_name = payer_info.get('name')
-            if not payer_name and 'claims' in ai_result and isinstance(ai_result['claims'], list) and ai_result['claims']:
-                payer_name = ai_result['claims'][0].get('payer_name')
+        # # If uploaded file is JSON, extract payer name and update detected_payer_id
+        # if ai_result and isinstance(ai_result, dict):
+        #     # Try to get payer name from top-level or claims
+        #     # payer_info = ai_result.get('fields')
+        #     # print("payer_info:11", payer_info)
+        #     # payer_info = ai_result.get('fields')[0]
+        #     # print("payer_info:22", payer_info)
+        #     # payer_name = payer_info.get('name')
+        #     if not payer_name and 'claims' in ai_result and isinstance(ai_result['claims'], list) and ai_result['claims']:
+        #         payer_name = ai_result['claims'][0].get('payer_name')
 
 
         if payer_name:
@@ -290,94 +375,101 @@ async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
 
         # 10. Store each claim JSON as a separate document in MongoDB extraction_result collection
         # Store all claims in extraction_results collection as separate documents
-        mongo_doc_ids = store_extraction_result(file_id, ai_result, raw_text, payer_name, uploaded_by) if flat_claims else []
+
+        for ai_result in claims:
+            mongo_doc_ids = store_extraction_result(file_id, ai_result, payer_name, uploaded_by)
+            
+        # mongo_doc_ids = store_extraction_result(file_id, ai_result, raw_text, payer_name, uploaded_by) if flat_claims else []
 
         # 11. Process payers and templates
         payer_template_status = {}
         detected_template_version_id = None
         payer_id = None
-        if flat_claims:
-            print("Processing payer and template matching...")
-            first_claim = flat_claims
-            payer_name = first_claim.get('payer_name')
-            if payer_name:
-                print(f"payer name ===============: {payer_name}")
-                payer_id = get_or_create_payer(payer_name, org_id)
-                print(f"payer_id ===============: {payer_id}")
-                # Find all template_ids for this payer
-                # from app.services.pg_upload_files import get_pg_conn  # Removed to avoid UnboundLocalError
-                pg = get_pg_conn()
-                cur = pg.cursor()
-                cur.execute("SELECT id FROM templates WHERE payer_id = %s", (payer_id,))
-                template_ids = [str(row[0]) for row in cur.fetchall()]
-                print("template_ids ===============:", template_ids)
-                cur.close()
-                pg.close()
 
-                sessions_collection = DB['template_builder_sessions']
-                cursor = sessions_collection.find({"template_id": {"$in": template_ids}})
-                template_sessions = await cursor.to_list(length=None)
-                claim_keys = list(first_claim.keys())
-                from app.services.payer_template_service import keys_match_template
-                best_match = None
-                best_frac = 0.0
-                for session in template_sessions:
-                    dynamic_keys = session.get("dynamic_keys", [])
-                    print(f"Checking session {session.get('_id')} with dynamic keys: {dynamic_keys}")
-                    if not dynamic_keys:
-                        continue
-                    
-                    # Extract flat key names from sections structure
-                    flat_key_names = []
-                    if isinstance(dynamic_keys, list) and len(dynamic_keys) > 0:
-                        if isinstance(dynamic_keys[0], dict):  # Section-based format
-                            for section in dynamic_keys:
-                                if isinstance(section, dict) and "fields" in section:
-                                    for field in section.get("fields", []):
-                                        if isinstance(field, dict) and "field" in field:
-                                            flat_key_names.append(field["field"])
-                        else:  # Legacy flat list format
-                            flat_key_names = [k for k in dynamic_keys if isinstance(k, str)]
-                    
-                    if not flat_key_names:
-                        continue
-                    
-                    extracted_set = set([k.lower() for k in claim_keys if k])
-                    template_set = set([k.lower() for k in flat_key_names if k])
+        for flat_claims in flat_claims_list:
 
-                    matched = extracted_set.intersection(template_set)
-                    frac = len(matched) / max(1, len(template_set))
-                    if frac > best_frac:
-                        best_frac = frac
-                        best_match = session
-                # mongo_client.close()
-                if best_match and best_frac > 0:
-                    detected_template_version_id = best_match.get("_id")
-                    print(f"Attempting to update upload_files: file_id={file_id}, detected_template_version_id={detected_template_version_id}, match_percentage={best_frac*100:.2f}%")
-                    logger.info(f"Attempting to update upload_files: file_id={file_id}, detected_template_version_id={detected_template_version_id}, match_percentage={best_frac*100:.2f}%")
+            if flat_claims:
+                print("Processing payer and template matching...")
+                first_claim = flat_claims
+                payer_name = first_claim.get('payer_name')
+                if payer_name:
+                    print(f"payer name ===============: {payer_name}")
+                    payer_id = get_or_create_payer(payer_name, org_id)
+                    print(f"payer_id ===============: {payer_id}")
+                    # Find all template_ids for this payer
+                    # from app.services.pg_upload_files import get_pg_conn  # Removed to avoid UnboundLocalError
                     pg = get_pg_conn()
                     cur = pg.cursor()
-                    cur.execute("UPDATE upload_files SET detected_template_version_id = %s WHERE id = %s", (detected_template_version_id, file_id))
-                    pg.commit()
-                    print(f"Update result: {cur.rowcount} row(s) affected.")
-                    logger.info(f"Update result: {cur.rowcount} row(s) affected.")
+                    cur.execute("SELECT id FROM templates WHERE payer_id = %s", (payer_id,))
+                    template_ids = [str(row[0]) for row in cur.fetchall()]
+                    print("template_ids ===============:", template_ids)
                     cur.close()
                     pg.close()
-                template_status = check_template_match(payer_id, list(first_claim.keys()))
-                payer_template_status = {
-                    "payer_id": payer_id,
-                    "template_status": template_status,
-                    "detected_template_version_id": detected_template_version_id
-                }
 
-        # 12. Store claims in PostgreSQL
-        claim_ids = store_claims_in_postgres(file_id, flat_claims, org_id, payer_id, payer_name)
+                    sessions_collection = DB['template_builder_sessions']
+                    cursor = sessions_collection.find({"template_id": {"$in": template_ids}})
+                    template_sessions = await cursor.to_list(length=None)
+                    claim_keys = list(first_claim.keys())
+                    from app.services.payer_template_service import keys_match_template
+                    best_match = None
+                    best_frac = 0.0
+                    for session in template_sessions:
+                        dynamic_keys = session.get("dynamic_keys", [])
+                        print(f"Checking session {session.get('_id')} with dynamic keys: {dynamic_keys}")
+                        if not dynamic_keys:
+                            continue
+                        
+                        # Extract flat key names from sections structure
+                        flat_key_names = []
+                        if isinstance(dynamic_keys, list) and len(dynamic_keys) > 0:
+                            if isinstance(dynamic_keys[0], dict):  # Section-based format
+                                for section in dynamic_keys:
+                                    if isinstance(section, dict) and "fields" in section:
+                                        for field in section.get("fields", []):
+                                            if isinstance(field, dict) and "field" in field:
+                                                flat_key_names.append(field["field"])
+                            else:  # Legacy flat list format
+                                flat_key_names = [k for k in dynamic_keys if isinstance(k, str)]
+                        
+                        if not flat_key_names:
+                            continue
+                        
+                        extracted_set = set([k.lower() for k in claim_keys if k])
+                        template_set = set([k.lower() for k in flat_key_names if k])
 
-        # 13. Update file status to processed if everything succeeded
-        update_file_status(file_id, "pending_review")
+                        matched = extracted_set.intersection(template_set)
+                        frac = len(matched) / max(1, len(template_set))
+                        if frac > best_frac:
+                            best_frac = frac
+                            best_match = session
+                    # mongo_client.close()
+                    if best_match and best_frac > 0:
+                        detected_template_version_id = best_match.get("_id")
+                        print(f"Attempting to update upload_files: file_id={file_id}, detected_template_version_id={detected_template_version_id}, match_percentage={best_frac*100:.2f}%")
+                        logger.info(f"Attempting to update upload_files: file_id={file_id}, detected_template_version_id={detected_template_version_id}, match_percentage={best_frac*100:.2f}%")
+                        pg = get_pg_conn()
+                        cur = pg.cursor()
+                        cur.execute("UPDATE upload_files SET detected_template_version_id = %s WHERE id = %s", (detected_template_version_id, file_id))
+                        pg.commit()
+                        print(f"Update result: {cur.rowcount} row(s) affected.")
+                        logger.info(f"Update result: {cur.rowcount} row(s) affected.")
+                        cur.close()
+                        pg.close()
+                    template_status = check_template_match(payer_id, list(first_claim.keys()))
+                    payer_template_status = {
+                        "payer_id": payer_id,
+                        "template_status": template_status,
+                        "detected_template_version_id": detected_template_version_id
+                    }
+
+            # 12. Store claims in PostgreSQL
+            claim_ids = store_claims_in_postgres(file_id, flat_claims, org_id, payer_id, payer_name)
+
+            # 13. Update file status to processed if everything succeeded
+            update_file_status(file_id, "pending_review")
 
         # Log AI extraction results
-        logger.info(f"AI extraction confidence: {ai_result.get('confidence', 0)}%")
+        # logger.info(f"AI extraction confidence: {ai_result.get('confidence', 0)}%")
         print()
         print()
         print("````````````````````````````````````````````````````")
@@ -385,15 +477,15 @@ async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
         print("````````````````````````````````````````````````````")
         print()
         print()
-        responses.append({
-            "filename": file.filename,
-            "status": "success",
-            "message": "File uploaded, validated, and processed.",
-            "s3_path": s3_path,
-            "file_id": file_id,
-            "mongo_doc_ids": mongo_doc_ids,
-            "claims_count": len(flat_claims),
-            "claim_ids": claim_ids,
-            "payer_template_status": payer_template_status
-        })
+        # responses.append({
+        #     "filename": file.filename,
+        #     "status": "success",
+        #     "message": "File uploaded, validated, and processed.",
+        #     "s3_path": s3_path,
+        #     "file_id": file_id,
+        #     "mongo_doc_ids": mongo_doc_ids,
+        #     "claims_count": len(flat_claims),
+        #     "claim_ids": claim_ids,
+        #     "payer_template_status": payer_template_status
+        # })
     return {"success": "File Upload successfully."}
