@@ -27,17 +27,10 @@ from .routes import template
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize database before serving requests
-    print(">>> Using JWT SECRET:", settings.JWT_SECRET)
-    print("settings object id:", id(settings))
-
-    print(">>> lifespan STARTING")   
     init_db()
-    print("MongoDB connection initialized.")
     yield
     # Optional: close DB connection
     # db.client.close()
-    print(">>> lifespan ENDING")
-    print("Application shutdown.")
 
 
 app = FastAPI(title="EOB → 835", lifespan=lifespan)

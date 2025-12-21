@@ -19,6 +19,10 @@ from app.services.ai_claim_extractor import ai_extract_claims, flatten_claims, f
 from app.services.payer_template_service import get_or_create_payer, check_template_match, store_claims_in_postgres
 import mimetypes
 from app.common.db.db import init_db
+import uuid
+import datetime
+import app.common.db.db as db_module
+
 
 DB = init_db()
 
@@ -45,6 +49,8 @@ async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
     Returns status and message per file.
     """
     responses = []
+    ext_collection = db_module.db["extraction_results"]  
+    claim_version = db_module.db["claim_version"]  
     for file in files:
         # 1. Check file size
         if file.size and file.size > MAX_FILE_SIZE:
@@ -108,9 +114,10 @@ async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
         cur.close()
         pg.close()
 
-        print('payer_names----->', payer_names)
+        print('payer_names----->', str(payer_names[0]))
 
         # 7. Extract text from file (universal for PDF, DOCX, TXT, image)
+
         raw_text = extract_text_from_file(content, file.filename, mime_type)
         logger.info(f"Extracted text for {file.filename} (first 200 chars): {raw_text[:200]}")
 
@@ -118,26 +125,72 @@ async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
         matched_payer_name = ''
         if payer_names and raw_text:
             for payer_tuple in payer_names:
+                print('payer_tuple----->', payer_tuple)
+                print('payer_tuple----->', payer_tuple[0])
                 payer_db_name = payer_tuple[0]
+                print('payer_db_name----->', payer_db_name)
                 if payer_db_name and payer_db_name.lower() in raw_text.lower():
                     matched_payer_name = payer_db_name
                     break
+        print('Matched payer name in extracted text:', matched_payer_name)
+        print('Matched payer name in extracted text:', matched_payer_name)
+        print('Matched payer name in extracted text:', matched_payer_name)
+        print('Matched payer name in extracted text:', matched_payer_name)
+        print('Matched payer name in extracted text:', matched_payer_name)
         print('Matched payer name in extracted text:', matched_payer_name)
 
         pg = get_pg_conn()
         cur = pg.cursor()
         cur.execute("SELECT id FROM payers WHERE name = %s AND org_id = %s", (matched_payer_name, org_id))
         payer_id = cur.fetchone()
+        if payer_id:
+            print("==if==")
+            cur.execute("SELECT id FROM templates WHERE payer_id = %s", (payer_id,))
+            template_id = cur.fetchone()
+        else:
+            print("==else==")
+            cur.execute(
+                """
+                UPDATE upload_files
+                SET processing_status = %s
+                WHERE id = %s
+                """,
+                ('need_template', file_id)
+            )
 
-        cur.execute("SELECT id FROM templates WHERE payer_id = %s", (payer_id))
-        template_id = cur.fetchone()
+            pg.commit()
+            claim_doc = {
+            "_id": str(uuid.uuid4()),
+            "fileId": file_id,
+            "rawExtracted": '',
+            "claim": '',
+            "aiConfidence": 0,
+            "extractionStatus": "",
+            "payerName": '',
+            "claimNumber": 0,
+            "totalExtractedAmount": 0,
+            "createdAt": datetime.datetime.utcnow(),
+            "status": "need_template",
+            "reviewerId": uploaded_by
+            }
+            ext_collection.insert_one(claim_doc)
+
+            claim_version.insert_one({
+            "file_id": file_id,
+            "extraction_id": claim_doc['_id'],
+            "version": "1.0",
+            "claim": '',
+            "created_at": datetime.datetime.utcnow(),
+            "updated_by": uploaded_by,
+            "status": "need_template"})
+
+            return {"message": "Template are not available of this file."}
         cur.close()
         pg.close()
 
         ext_collection = DB["template_builder_sessions"] 
         temp_data = await ext_collection.find_one({"template_id": template_id[0]})
         dynamic_key = temp_data.get("dynamic_keys", []) if temp_data else []
-        
         
         # 7.5. Quick text readability check
         if not raw_text or len(raw_text.strip()) < 50:
@@ -154,11 +207,54 @@ async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
             continue
         
         # 8. AI extraction: use AI model to convert text to JSON
+
+
+
+
+        # operation start
+        print("===============================================")
+
+
+        print("Starting AI extraction for file:", file.filename)
+        print("Using dynamic keys:", dynamic_key)
+        print("Extracted raw text (first 500 chars):", raw_text)
+
+        print("===============================================")
+        # operation end
+
+
+
+
+        print()
+        print()
+        print()
+        print()
+        print()
+        print()
+        print("End End End End End End End End End End End End End ................................................")
+        print()
+        print()
+        print()
+        print()
+        print()
+        print()
+        print()
+        print()
+
+
+
+        print("AI extraction result start---> ")
         ai_result = ai_extract_claims(raw_text, dynamic_key)
         print("AI extraction result:", ai_result)
+        print()
         # flat_claims = flatten_claims(ai_result)
+        print("Flattened claims start---> ")
         flat_claims = flatten_claims2(ai_result)
         print("Flattened claims:", flat_claims)
+        print()
+        print()
+
+
 
         payer_name = None
         if flat_claims:
@@ -176,11 +272,7 @@ async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
             if not payer_name and 'claims' in ai_result and isinstance(ai_result['claims'], list) and ai_result['claims']:
                 payer_name = ai_result['claims'][0].get('payer_name')
 
-        print("======> Payer Name extracted from AI result: ", payer_name)
-        print("======> Payer Name extracted from AI result: ", payer_name)
-        print("======> Payer Name extracted from AI result: ", payer_name)
-        print("======> Payer Name extracted from AI result: ", payer_name)
-        print("======> Payer Name extracted from AI result: ", payer_name)
+
         if payer_name:
 
             # Check if payer exists in payer table
@@ -286,7 +378,13 @@ async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
 
         # Log AI extraction results
         logger.info(f"AI extraction confidence: {ai_result.get('confidence', 0)}%")
-        
+        print()
+        print()
+        print("````````````````````````````````````````````````````")
+        print("`````````````````````Server End`````````````````````")
+        print("````````````````````````````````````````````````````")
+        print()
+        print()
         responses.append({
             "filename": file.filename,
             "status": "success",

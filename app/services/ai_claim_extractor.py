@@ -2,6 +2,7 @@ from typing import List, Dict, Any
 import uuid
 import json
 import os
+import re
 from ..utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -25,6 +26,11 @@ try:
 except ImportError as e:
     OPENAI_AVAILABLE = False
     OPENAI_API_KEY = None
+
+    
+
+
+
 
 def ai_extract_claims(raw_text: str, dynamic_key: List[str]) -> Dict[str, Any]:
     """
@@ -50,6 +56,8 @@ def ai_extract_claims(raw_text: str, dynamic_key: List[str]) -> Dict[str, Any]:
     else:
         logger.warning("OpenAI not available, using fallback extraction")
         return create_fallback_result(raw_text)
+
+
 
 def create_fallback_result(raw_text: str) -> Dict[str, Any]:
     """
@@ -269,6 +277,45 @@ def create_fallback_result(raw_text: str) -> Dict[str, Any]:
 
 
 
+def _build_extraction_hints(raw_text: str) -> Dict[str, Any]:
+    """
+    Build lightweight regex-based hints to help the model find service line data.
+    We do NOT trust these fully; they are only contextual hints used in the prompt.
+    """
+    lines = [ln.strip() for ln in raw_text.splitlines() if ln.strip()]
+
+    # Common patterns
+    date_pat = re.compile(r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b")
+    amount_pat = re.compile(r"\$?\d{1,3}(?:,\d{3})*(?:\.\d{2})?")
+    cpt_pat = re.compile(r"\b\d{5}\b")  # CPT: 5-digit numeric
+    hcpcs_pat = re.compile(r"\b[A-Z]\d{4}\b")  # HCPCS: letter + 4 digits
+    rev_code_pat = re.compile(r"\b(?:REV|REVENUE)\s*CODE\b|\b\d{4}\b", re.IGNORECASE)
+    units_pat = re.compile(r"\b(?:units?|qty|quantity)\s*[:\-]?\s*(\d+(?:\.\d+)?)\b", re.IGNORECASE)
+
+    service_line_candidates: List[Dict[str, Any]] = []
+    for ln in lines:
+        # Heuristics: line containing at least a code and amount/date/units
+        has_code = bool(cpt_pat.search(ln) or hcpcs_pat.search(ln) or rev_code_pat.search(ln))
+        has_other = bool(amount_pat.search(ln) or date_pat.search(ln) or units_pat.search(ln))
+        has_marker = any(k in ln.lower() for k in ["svc", "service", "dos", "proc", "procedure", "hcpcs", "cpt", "rev"])
+        if (has_code and has_other) or (has_code and has_marker):
+            service_line_candidates.append({
+                "line": ln,
+                "dates": date_pat.findall(ln),
+                "amounts": amount_pat.findall(ln),
+                "units": units_pat.findall(ln),
+                "cpt": cpt_pat.findall(ln),
+                "hcpcs": hcpcs_pat.findall(ln),
+                "rev_code_hit": bool(rev_code_pat.search(ln)),
+            })
+        if len(service_line_candidates) >= 50:
+            break
+
+    return {
+        "service_line_candidates": service_line_candidates,
+    }
+#=========================start=================================
+
 def extract_with_openai(raw_text: str, dynamic_keys: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Extract structured data from raw text using dynamic_keys driven schema.
@@ -276,6 +323,8 @@ def extract_with_openai(raw_text: str, dynamic_keys: List[Dict[str, Any]]) -> Di
 
     try:
         client = openai.OpenAI(api_key=OPENAI_API_KEY)
+
+        hints = _build_extraction_hints(raw_text)
 
         prompt = """
             You are given TWO inputs.
@@ -287,6 +336,11 @@ def extract_with_openai(raw_text: str, dynamic_keys: List[Dict[str, Any]]) -> Di
 
             INPUT 2:
             Raw document text.
+
+            AUXILIARY INPUT 3 (HINTS):
+            A small JSON with regex-detected candidates for service line data
+            (procedure codes, units, amounts, dates). Use these ONLY as guidance
+            to improve recall; do not invent values.
 
             GOAL:
             Return extracted data by COPYING the structure of `dynamic_keys`
@@ -313,6 +367,21 @@ def extract_with_openai(raw_text: str, dynamic_keys: List[Dict[str, Any]]) -> Di
             - dynamic_keys = schema
             - section = grouping
             - field = extraction unit
+
+                        SPECIAL INSTRUCTIONS FOR SERVICE LINE DATA:
+                        - Sections whose names or dataKey indicate service lines (contains any of:
+                            "service", "svc", "service line") must be populated by scanning both raw text
+                            AND HINTS. Many documents encode service lines as rows in tables.
+                        - Use common patterns:
+                            • CPT: 5-digit numeric (e.g., 99213)
+                            • HCPCS: letter + 4 digits (e.g., J1234)
+                            • Units: integers/decimals near words like "Units", "Qty", "Quantity"
+                            • Dates of service: mm/dd/yyyy (or similar), often a range like 10/08/2025 - 10/08/2025
+                            • Amounts: $1,234.56 style
+                        - Prefer a value that appears on the same line or row as the code.
+                        - If multiple candidates exist, choose the most contextually relevant one,
+                            prioritizing proximity and section semantics; otherwise return null.
+                        - Do NOT add new fields; only fill the existing ones defined in dynamic_keys.
 
             MANDATORY OUTPUT FORMAT:
 
@@ -346,7 +415,10 @@ def extract_with_openai(raw_text: str, dynamic_keys: List[Dict[str, Any]]) -> Di
             """ + json.dumps(dynamic_keys, ensure_ascii=False) + """
 
             RAW TEXT:
-            """ + raw_text[:4000]
+            """ + raw_text[:6000] + """
+
+            HINTS:
+            """ + json.dumps(hints, ensure_ascii=False)
 
         response = client.chat.completions.create(
             model="gpt-4o-mini",
@@ -359,6 +431,10 @@ def extract_with_openai(raw_text: str, dynamic_keys: List[Dict[str, Any]]) -> Di
         )
 
         content = response.choices[0].message.content.strip()
+
+        print()
+        print("OpenAI raw response content:=========", content)
+        print()
 
         # Remove markdown if present
         if content.startswith("```"):
@@ -396,6 +472,99 @@ def extract_with_openai(raw_text: str, dynamic_keys: List[Dict[str, Any]]) -> Di
             "error": "Unhandled extraction error",
             "details": str(e),
         }
+#=========================end===============================
+
+#==================================================================
+
+# def extract_with_openai(raw_text: str, dynamic_keys: List[Dict[str, Any]]) -> Dict[str, Any]:
+#     """
+#     Extract structured data from raw text using dynamic_keys driven schema.
+#     FINAL OUTPUT SHAPE = dynamic_keys-like, repeated per claim
+#     """
+
+#     try:
+#         client = openai.OpenAI(api_key=OPENAI_API_KEY)
+
+#         # 1️⃣ Split raw text into claim segments
+#         segments = _split_claims(raw_text)
+
+#         claims: List[Dict[str, Any]] = []
+
+#         for seg_text in segments:
+#             seg_hints = _build_extraction_hints(seg_text)
+
+#             prompt = """
+# You are given TWO inputs.
+
+# INPUT 1:
+# A JSON object named `dynamic_keys`.
+# It defines the EXACT response schema.
+
+# INPUT 2:
+# Raw document text (ONE claim only).
+
+# RULES:
+# 1. Copy dynamic_keys EXACTLY.
+# 2. Do NOT remove, rename, reorder keys.
+# 3. Add ONLY `value` inside each field.
+# 4. Extract values ONLY from raw text.
+# 5. If value missing → null.
+
+# OUTPUT FORMAT (ONLY THIS):
+
+# {
+#   "sections": [ ...dynamic_keys with values... ]
+# }
+
+# NO explanations.
+# ONLY valid JSON.
+# dynamic_keys:
+# """ + json.dumps(dynamic_keys, ensure_ascii=False) + """
+
+# RAW TEXT:
+# """ + seg_text[:3500] + """
+
+# HINTS:
+# """ + json.dumps(seg_hints, ensure_ascii=False)
+
+#             response = client.chat.completions.create(
+#                 model="gpt-4o-mini",
+#                 messages=[
+#                     {"role": "system", "content": "You are a strict JSON extraction engine."},
+#                     {"role": "user", "content": prompt},
+#                 ],
+#                 temperature=0,
+#                 response_format={"type": "json_object"},
+#                 max_tokens=2000,
+#             )
+
+#             content = response.choices[0].message.content.strip()
+#             payload = _sanitize_ai_json(content)
+#             extracted = _extract_first_json_value(payload) or payload
+
+#             try:
+#                 result = json.loads(extracted)
+#             except Exception:
+#                 result = {"sections": []}
+
+#             # 🔒 Guarantee value key
+#             for section in result.get("sections", []):
+#                 for field in section.get("fields", []):
+#                     field.setdefault("value", None)
+
+#             claims.append(result)
+
+#         # ✅ FINAL OUTPUT — dynamic_keys-like
+#         return {
+#             "claims": claims
+#         }
+
+#     except Exception as e:
+#         logger.error("Extraction failed", exc_info=True)
+#         return {
+#             "claims": [],
+#             "error": str(e),
+#         }
 
 
 def extract_with_rules(raw_text: str) -> List[Dict[str, Any]]:
@@ -463,6 +632,37 @@ def flatten_claims2(data: dict) -> dict:
         
     }
 
+    # Helpers to robustly parse numeric values (currency, commas, parentheses)
+    def _parse_float(v) -> float:
+        try:
+            if v is None:
+                return 0.0
+            if isinstance(v, (int, float)):
+                return float(v)
+            if isinstance(v, str):
+                s = v.strip()
+                if not s:
+                    return 0.0
+                neg = False
+                if s.startswith("(") and s.endswith(")"):
+                    neg = True
+                    s = s[1:-1]
+                s = s.replace(",", "").replace("$", "").replace("USD", "").strip()
+                m = re.search(r"-?\d+(?:\.\d+)?", s)
+                if not m:
+                    return 0.0
+                num = float(m.group(0))
+                return -num if neg else num
+            return 0.0
+        except Exception:
+            return 0.0
+
+    def _parse_int(v) -> int:
+        try:
+            return int(_parse_float(v))
+        except Exception:
+            return 0
+
     # iterate all sections → all fields
     for section in data.get("sections", []):
         for field in section.get("fields", []):
@@ -486,7 +686,7 @@ def flatten_claims2(data: dict) -> dict:
                 result["payment_date"] = value
 
             elif field_name == "payment_amount":
-                result["payment_amount"] = float(value) if value is not None and value != '' else 0.0
+                result["payment_amount"] = _parse_float(value)
 
             elif field_name == "claim_payment":
                 result["claim_payment"] = value
@@ -501,22 +701,18 @@ def flatten_claims2(data: dict) -> dict:
                 result["payee_name"] = value
 
             elif field_name == "payment":
-                # print( "value payment:", value)
-                # print( "type payment:", type(value))
-                # print( "s1:", int(float(value)))
-                # print( "s2:", str(int(float(value))))
-                result["payment"] = int(float(value)) if value is not None and value != '' else 0
+                result["payment"] = _parse_int(value)
 
 
 
             elif field_name == "claim_payment":
-                result["claim_payment"] = int(float(value)) if value is not None and value != '' else 0
+                result["claim_payment"] = _parse_int(value)
             
             elif field_name == "total_paid":
-                result["total_paid"] = int(float(value)) if value is not None and value != '' else 0
+                result["total_paid"] = _parse_int(value)
 
             elif field_name == "adj_amount":
-                result["adj_amount"] = int(float(value)) if value is not None and value != '' else 0
+                result["adj_amount"] = _parse_int(value)
 
             elif field_name == "claim_status_code":
                 result["claim_status_code"] = value
@@ -534,7 +730,7 @@ def flatten_claims2(data: dict) -> dict:
                 result["dates_of_service"] = value
             
             elif field_name == "units":
-                result["units"] = value
+                result["units"] = _parse_int(value)
                 
             elif field_name == "patient_id":
                 result["patient_id"] = value
@@ -557,43 +753,29 @@ def flatten_claims(extracted: Dict[str, Any]) -> List[Dict[str, Any]]:
     # if not extracted or "claims" not in extracted:
     #     return flat
     
-    # for section in extracted.get("sections"):
-    #     key = section.get("file_payment_information")
-    #     print( "key:", key)
+    for section in extracted.get("sections"):
+        key = section.get("file_payment_information")
+        print( "key:", key)
 
 
-    # payment_info_fields = extracted["sections"][0]["fields"]
-    # claim_info_fields = extracted["sections"][1]["fields"]
-    # serviceline_info_fields = extracted["sections"][2]["fields"]
+    # Optional debug of sections/fields (disabled)
 
-    # for i in payment_info_fields:
-    #     print( "payment_info_field:", i)
-
-    # for i in claim_info_fields:
-    #     print( "claim_info_field:", i)
-
-    # for i in serviceline_info_fields:
-    #     print( "serviceline_info_field:", i)
-
-    # payer_info = extracted.get("fields", {})
-    # payment_info = extracted.get("payment", {})
-    # overall_confidence = extracted.get("confidence", 0)
+    payer_info = extracted.get("fields", {})
+    payment_info = extracted.get("payment", {})
+    overall_confidence = extracted.get("confidence", 0)
     
-    # for claim in extracted.get("claims", []):
-    #     flat_claim = {
-    #         "payer_name": payer_info.get("name", "Unknown Payer"),
-    #         "payer_code": payer_info.get("code"),
-    #         "payment_reference": payment_info.get("payment_reference"),
-    #         "payment_date": payment_info.get("payment_date"),
-    #         "payment_amount": payment_info.get("payment_amount", 0),
-    #         "overall_confidence": overall_confidence,
-    #         "payer_confidence": payer_info.get("confidence", 0),
-    #         "claim_confidence": claim.get("confidence", 0),
-    #         **claim
-    #     }
-    #     flat.append(flat_claim)
+    for claim in extracted.get("claims", []):
+        flat_claim = {
+            "payer_name": payer_info.get("name", "Unknown Payer"),
+            "payer_code": payer_info.get("code"),
+            "payment_reference": payment_info.get("payment_reference"),
+            "payment_date": payment_info.get("payment_date"),
+            "payment_amount": payment_info.get("payment_amount", 0),
+            "overall_confidence": overall_confidence,
+            "payer_confidence": payer_info.get("confidence", 0),
+            "claim_confidence": claim.get("confidence", 0),
+            **claim
+        }
+        flat.append(flat_claim)
 
-    # flat = extract_payment_fields(extracted)
-
-    
     return flat

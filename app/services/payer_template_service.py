@@ -230,7 +230,9 @@ def store_claims_in_postgres(file_id: str, flat_claims: List[Dict[str, Any]], or
         # Process EACH claim individually - no grouping by payer
         # for i, claim in enumerate(flat_claims, 1):
 
+        print()
         print("flat_claims", flat_claims)
+        print()
         # for i, claim in enumerate(flat_claims):
         # for i, claim in enumerate(flat_claims):
             # logger.info(f"Processing claim {i}/{len(flat_claims)}: {claim.get('claim_number', 'N/A')}")
@@ -242,7 +244,7 @@ def store_claims_in_postgres(file_id: str, flat_claims: List[Dict[str, Any]], or
             # payer_id = get_or_create_payer(payer_name, org_id)
 
         payer_name = payer_name
-        payer_id = payer_id
+        payer_id = "b29354dc-5796-41dd-bcd1-244b0ea184f2"
         print("payer_id=====", payer_id)
             
         # Create SEPARATE payment record for EACH claim
