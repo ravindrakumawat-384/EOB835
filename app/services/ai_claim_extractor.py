@@ -632,6 +632,37 @@ def flatten_claims2(data: dict) -> dict:
         
     }
 
+    # Helpers to robustly parse numeric values (currency, commas, parentheses)
+    def _parse_float(v) -> float:
+        try:
+            if v is None:
+                return 0.0
+            if isinstance(v, (int, float)):
+                return float(v)
+            if isinstance(v, str):
+                s = v.strip()
+                if not s:
+                    return 0.0
+                neg = False
+                if s.startswith("(") and s.endswith(")"):
+                    neg = True
+                    s = s[1:-1]
+                s = s.replace(",", "").replace("$", "").replace("USD", "").strip()
+                m = re.search(r"-?\d+(?:\.\d+)?", s)
+                if not m:
+                    return 0.0
+                num = float(m.group(0))
+                return -num if neg else num
+            return 0.0
+        except Exception:
+            return 0.0
+
+    def _parse_int(v) -> int:
+        try:
+            return int(_parse_float(v))
+        except Exception:
+            return 0
+
     # iterate all sections → all fields
     for section in data.get("sections", []):
         for field in section.get("fields", []):
@@ -655,7 +686,7 @@ def flatten_claims2(data: dict) -> dict:
                 result["payment_date"] = value
 
             elif field_name == "payment_amount":
-                result["payment_amount"] = float(value) if value is not None and value != '' else 0.0
+                result["payment_amount"] = _parse_float(value)
 
             elif field_name == "claim_payment":
                 result["claim_payment"] = value
@@ -670,22 +701,18 @@ def flatten_claims2(data: dict) -> dict:
                 result["payee_name"] = value
 
             elif field_name == "payment":
-                # print( "value payment:", value)
-                # print( "type payment:", type(value))
-                # print( "s1:", int(float(value)))
-                # print( "s2:", str(int(float(value))))
-                result["payment"] = int(float(value)) if value is not None and value != '' else 0
+                result["payment"] = _parse_int(value)
 
 
 
             elif field_name == "claim_payment":
-                result["claim_payment"] = int(float(value)) if value is not None and value != '' else 0
+                result["claim_payment"] = _parse_int(value)
             
             elif field_name == "total_paid":
-                result["total_paid"] = int(float(value)) if value is not None and value != '' else 0
+                result["total_paid"] = _parse_int(value)
 
             elif field_name == "adj_amount":
-                result["adj_amount"] = int(float(value)) if value is not None and value != '' else 0
+                result["adj_amount"] = _parse_int(value)
 
             elif field_name == "claim_status_code":
                 result["claim_status_code"] = value
@@ -703,7 +730,7 @@ def flatten_claims2(data: dict) -> dict:
                 result["dates_of_service"] = value
             
             elif field_name == "units":
-                result["units"] = value
+                result["units"] = _parse_int(value)
                 
             elif field_name == "patient_id":
                 result["patient_id"] = value
@@ -726,43 +753,29 @@ def flatten_claims(extracted: Dict[str, Any]) -> List[Dict[str, Any]]:
     # if not extracted or "claims" not in extracted:
     #     return flat
     
-    # for section in extracted.get("sections"):
-    #     key = section.get("file_payment_information")
-    #     print( "key:", key)
+    for section in extracted.get("sections"):
+        key = section.get("file_payment_information")
+        print( "key:", key)
 
 
-    # payment_info_fields = extracted["sections"][0]["fields"]
-    # claim_info_fields = extracted["sections"][1]["fields"]
-    # serviceline_info_fields = extracted["sections"][2]["fields"]
+    # Optional debug of sections/fields (disabled)
 
-    # for i in payment_info_fields:
-    #     print( "payment_info_field:", i)
-
-    # for i in claim_info_fields:
-    #     print( "claim_info_field:", i)
-
-    # for i in serviceline_info_fields:
-    #     print( "serviceline_info_field:", i)
-
-    # payer_info = extracted.get("fields", {})
-    # payment_info = extracted.get("payment", {})
-    # overall_confidence = extracted.get("confidence", 0)
+    payer_info = extracted.get("fields", {})
+    payment_info = extracted.get("payment", {})
+    overall_confidence = extracted.get("confidence", 0)
     
-    # for claim in extracted.get("claims", []):
-    #     flat_claim = {
-    #         "payer_name": payer_info.get("name", "Unknown Payer"),
-    #         "payer_code": payer_info.get("code"),
-    #         "payment_reference": payment_info.get("payment_reference"),
-    #         "payment_date": payment_info.get("payment_date"),
-    #         "payment_amount": payment_info.get("payment_amount", 0),
-    #         "overall_confidence": overall_confidence,
-    #         "payer_confidence": payer_info.get("confidence", 0),
-    #         "claim_confidence": claim.get("confidence", 0),
-    #         **claim
-    #     }
-    #     flat.append(flat_claim)
+    for claim in extracted.get("claims", []):
+        flat_claim = {
+            "payer_name": payer_info.get("name", "Unknown Payer"),
+            "payer_code": payer_info.get("code"),
+            "payment_reference": payment_info.get("payment_reference"),
+            "payment_date": payment_info.get("payment_date"),
+            "payment_amount": payment_info.get("payment_amount", 0),
+            "overall_confidence": overall_confidence,
+            "payer_confidence": payer_info.get("confidence", 0),
+            "claim_confidence": claim.get("confidence", 0),
+            **claim
+        }
+        flat.append(flat_claim)
 
-    # flat = extract_payment_fields(extracted)
-
-    
     return flat
