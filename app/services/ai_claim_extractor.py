@@ -49,6 +49,12 @@ def ai_extract_claims(raw_text: str, dynamic_key: List[str]) -> Dict[str, Any]:
             # else:
             #     logger.warning("OpenAI returned empty claims, using fallback")
             #     return create_fallback_result(raw_text)
+
+
+            
+
+
+
             return result
         except Exception as e:
             logger.error("OpenAI extraction failed: %s", str(e))
@@ -433,7 +439,7 @@ def extract_with_openai(raw_text: str, dynamic_keys: List[Dict[str, Any]]) -> Di
         content = response.choices[0].message.content.strip()
 
         print()
-        print("OpenAI raw response content:=========", content)
+        # print("OpenAI raw response content:=========", content)
         print()
 
         # Remove markdown if present
@@ -446,7 +452,7 @@ def extract_with_openai(raw_text: str, dynamic_keys: List[Dict[str, Any]]) -> Di
         for section in result.get("sections", []):
             for field in section.get("fields", []):
                 field.setdefault("value", None)
-        print("OpenAI extraction result:=========", result)
+        # print("OpenAI extraction result:=========", result)
         return result
 
     except json.JSONDecodeError as e:
@@ -671,9 +677,12 @@ def flatten_claims2(data: dict) -> dict:
             value = field.get("value")
             confidence = field.get("confidence")
 
+            print()
             print("field_name===========:", field_name)
+            print("value===========:", value)
+            print()
 
-            if field_name == "payer":
+            if field_name == "payer" or field_name == "payer_name":
                 result["payer_name"] = value
 
             elif field_name == "remark_payer_code":
