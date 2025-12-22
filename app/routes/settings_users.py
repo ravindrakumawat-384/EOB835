@@ -1,19 +1,11 @@
+
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
-from bson import ObjectId
-
-import app.common.db.db as db_module
-from ..services.crud import (
-    list_team_members,
-    create_team_member,
-    update_team_member,
-    delete_team_member,
-)
 from ..services.auth_deps import get_current_user, require_role
 from ..utils.logger import get_logger
-
-
+from app.common.db.pg_db import get_pg_conn
+import psycopg2.extras
 logger = get_logger(__name__)
 router = APIRouter(prefix="/settings/users", tags=["settings-users"])
 
@@ -81,45 +73,39 @@ class UsersResponse(BaseModel):
 async def serialize_usr(doc: dict) -> UserItem:
     if not doc:
         return None
-
-    user = await db_module.db.users.find_one({"id": doc["user_id"]}, {"_id": 0})
-    logger.info(f"Fetched user for user_id: {user}")
-
-    status = "active" if user.get("is_active") else "inactive"
-
-    return UserItem(
-        id=user["id"],
-        name=user["full_name"],
-        email=user["email"],
-        role=doc.get("role"),
-        status=status,
-    )
+    with get_pg_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT id, full_name, email, is_active FROM users WHERE id = %s LIMIT 1", (doc["user_id"],))
+            user = cur.fetchone()
+            logger.info(f"Fetched user for user_id: {user}")
+            status = "active" if user and user.get("is_active") else "inactive"
+            return UserItem(
+                id=user["id"] if user else doc["user_id"],
+                name=user["full_name"] if user else "",
+                email=user["email"] if user else "",
+                role=doc.get("role"),
+                status=status,
+            )
 
 
 # -------------------- GET USERS --------------------
 @router.get("/", response_model=UsersResponse, )
 async def get_users(user: Dict[str, Any] = Depends(get_current_user)):
     try:
-        # TODO: Replace with actual logged-in user
-        # user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4"
         user_id = user.get("id")
-        print("User ID:", user_id)
-        org = await db_module.db.organization_memberships.find_one({"user_id": user_id})
-        if not org:
-            raise HTTPException(status_code=404, detail="Organization not found")
-
-        org_id = org.get("org_id")
-
-        # fetch org members
-        members = (
-            await db_module.db.organization_memberships.find(
-                {"org_id": org_id}, {"_id": 0}
-            ).to_list(length=None)
-        )
-
-        # serialize all members
-        all_users = [await serialize_usr(doc) for doc in members]
-
+        with get_pg_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                # Get org_id for current user
+                cur.execute("SELECT org_id FROM organization_memberships WHERE user_id = %s LIMIT 1", (user_id,))
+                org = cur.fetchone()
+                if not org:
+                    raise HTTPException(status_code=404, detail="Organization not found")
+                org_id = org["org_id"]
+                # Get all memberships for org
+                cur.execute("SELECT user_id, role FROM organization_memberships WHERE org_id = %s", (org_id,))
+                members = cur.fetchall()
+                # Serialize all members
+                all_users = [await serialize_usr(doc) for doc in members]
         table_headers = [
             {"field": "name", "label": "Name"},
             {"field": "email", "label": "Email"},
@@ -141,27 +127,23 @@ async def get_users(user: Dict[str, Any] = Depends(get_current_user)):
                 ],
             },
         ]
-
-        # EXAMPLE static permissions (replace with your actual logic)
         role_permissions = [
             RolePermission(
                 role="admin",
                 description="Full access to all features and settings",
-                userCount=sum(1 for u in all_users if u.role == "admin"),
+                userCount=sum(1 for u in all_users if u and u.role == "admin"),
             ),
             RolePermission(
                 role="reviewer",
                 description="Basic read/write access",
-                userCount=sum(1 for u in all_users if u.role == "reviewer"),
+                userCount=sum(1 for u in all_users if u and u.role == "reviewer"),
             ),
-
             RolePermission(
                 role="viewer",
                 description="Basic read",
-                userCount=sum(1 for u in all_users if u.role == "viewer"),
+                userCount=sum(1 for u in all_users if u and u.role == "viewer"),
             ),
         ]
-
         return UsersResponse(
             teamMembersTableData=TeamMembersTableData(
                 tableHeaders=[TableHeader(**h) for h in table_headers],
@@ -170,7 +152,6 @@ async def get_users(user: Dict[str, Any] = Depends(get_current_user)):
             rolePermissions=role_permissions,
             success="User & teams details fetched successfully",
         )
-
     except Exception as e:
         logger.error(f"Failed to fetch team members: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch team members")
@@ -181,29 +162,29 @@ async def get_users(user: Dict[str, Any] = Depends(get_current_user)):
 async def post_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
     try:
         user_id = user.get("id")
-        print("User ID:", user_id)
-        
-        # find new user
-        usr = await db_module.db.users.find_one({"email": payload["email"]}, {"_id": 0})
-        if not usr:
-            raise HTTPException(status_code=404, detail="User not found")
-
-        add_user_id = usr["id"]
-
-        org = await db_module.db.organization_memberships.find_one({"user_id": user_id})
-        org_id = org.get("org_id")
-
-        payload_update = {
-            "org_id": org_id,
-            "user_id": add_user_id,
-            "role": payload["role"],
-        }
-
-        member = await create_team_member(payload_update)
-        logger.info(f"Created team member: {member}")
-
-        return {"message": "User added successfully", "member": member}
-
+        with get_pg_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                # Find user to add
+                cur.execute("SELECT id FROM users WHERE email = %s LIMIT 1", (payload["email"],))
+                usr = cur.fetchone()
+                if not usr:
+                    raise HTTPException(status_code=404, detail="User not found")
+                add_user_id = usr["id"]
+                # Get org_id for current user
+                cur.execute("SELECT org_id FROM organization_memberships WHERE user_id = %s LIMIT 1", (user_id,))
+                org = cur.fetchone()
+                if not org:
+                    raise HTTPException(status_code=404, detail="Organization not found")
+                org_id = org["org_id"]
+                # Insert new membership
+                cur.execute(
+                    "INSERT INTO organization_memberships (org_id, user_id, role, created_at) VALUES (%s, %s, %s, %s) RETURNING id",
+                    (org_id, add_user_id, payload["role"], datetime.utcnow())
+                )
+                member_id = cur.fetchone()["id"]
+                conn.commit()
+        logger.info(f"Created team member: {member_id}")
+        return {"message": "User added successfully", "member": member_id}
     except Exception as e:
         logger.error(f"Failed to create team member: {e}")
         raise HTTPException(status_code=500, detail="Failed to create team member")
@@ -213,16 +194,19 @@ async def post_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_
 @router.patch("/", dependencies=[Depends(require_role(["Admin"]))])
 async def patch_user(payload: Dict[str, Any]):
     try:
-        print()
-        print("payload in patch_user:", payload)
-        print()
-        updated = await update_team_member(payload)
-
-        if not updated:
-            raise HTTPException(status_code=404, detail="Member not found")
-
+        member_id = payload.get("userId")
+        with get_pg_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE users SET full_name = %s, email = %s, is_active = %s WHERE id = %s",
+                    (payload["name"], payload["email"], payload["status"], member_id)
+                )
+                cur.execute(
+                    "UPDATE organization_memberships SET role = %s WHERE user_id = %s",
+                    (payload["role"], member_id)
+                )
+                conn.commit()
         return {"Success": "User updated successfully"}
-
     except Exception as e:
         logger.error(f"Failed to update user: {e}")
         raise HTTPException(status_code=500, detail="Failed to update user")
@@ -232,20 +216,22 @@ async def patch_user(payload: Dict[str, Any]):
 @router.delete("/{member_id}")
 async def del_user(member_id: str, user: Dict[str, Any] = Depends(get_current_user)):
     try:
-        # admin_id = "6f64216e-7fbd-4abc-b676-991a121a95e4"
         user_id = user.get("id")
-        print("User ID:", user_id)
-
-        org = await db_module.db.organization_memberships.find_one({"user_id": user_id})
-        org_id = org.get("org_id")
-
-        deleted = await delete_team_member(member_id, org_id)
-
-        if not deleted:
-            raise HTTPException(status_code=404, detail="Member not found")
-
+        with get_pg_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                # Get org_id for current user
+                cur.execute("SELECT org_id FROM organization_memberships WHERE user_id = %s LIMIT 1", (user_id,))
+                org = cur.fetchone()
+                if not org:
+                    raise HTTPException(status_code=404, detail="Organization not found")
+                org_id = org["org_id"]
+                # Delete membership
+                cur.execute(
+                    "DELETE FROM organization_memberships WHERE user_id = %s AND org_id = %s",
+                    (member_id, org_id)
+                )
+                conn.commit()
         return {"message": "User deleted successfully"}
-
     except Exception as e:
         logger.error(f"Failed to delete team member: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete team member")

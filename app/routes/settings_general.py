@@ -1,15 +1,14 @@
 
+
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Dict, Any
-from ..services.crud import get_org_settings, upsert_org_settings
 from ..services.auth_deps import get_current_user, require_role
-import app.common.db.db as db_module
 from datetime import datetime
 from pydantic import BaseModel
 from ..utils.logger import get_logger
+from app.common.db.pg_db import get_pg_conn
+import psycopg2.extras
 logger = get_logger(__name__)
-
-from bson import ObjectId
 
 router = APIRouter(prefix="/settings/general", tags=["settings-general"])
 
@@ -21,150 +20,115 @@ class UpdateGeneral(BaseModel):
     org_id: str
 
 
-def clean_mongo_doc(doc):
-    if not doc:
-        return None
-    doc = dict(doc)
-    doc.pop('_id', None)
-    
-    # convert ObjectId fields (if any)
-    for key, val in doc.items():
-        if isinstance(val, ObjectId):
-            doc[key] = str(val)
-    return doc
-
-
 
 @router.get("", response_model=Dict[str, Any])
 async def read_general_settings(user: Dict[str, Any] = Depends(get_current_user)):
-# async def read_general_settings():
     try:
-        print("user:", user)
         user_id = user.get("id")
-        print("User ID:", user_id)
-        logger.info("Fetching general settings for user")        
-        # user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
+        logger.info("Fetching general settings for user")
         logger.debug(f"User ID: {user_id}")
-        
-        time_zone = "pt"  # Default time zone
-        # time_zone = datetime.utcnow()
 
-        # user = await db_module.db.users.find_one({"user_id": user_id})
-        # logger.debug(f"User: {user}")
-        # org_id = user.get("organization_id") or user.get("org_id")
-        try:
-            membership = await db_module.db.organization_memberships.find_one({"user_id": user_id})
-        except Exception as e:
-            logger.error(f"Error fetching membership for user_id {user_id}: {e}")
-            raise HTTPException(status_code=500, detail="User membership retrieval failed")
+        with get_pg_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                # Get membership
+                cur.execute("""
+                    SELECT org_id, role FROM organization_memberships WHERE user_id = %s LIMIT 1
+                """, (user_id,))
+                membership = cur.fetchone()
+                if not membership:
+                    logger.warning(f"No membership found for user_id: {user_id}")
+                    raise HTTPException(status_code=404, detail="User membership not found")
+                org_id = membership["org_id"]
+                role = membership["role"]
 
-        role = membership.get("role")
-        org_id = membership.get("org_id") 
-        org = await db_module.db.organizations.find_one({"id": org_id})
-        org = clean_mongo_doc(org)
-        org_name = org.get("name") if org else None
+                # Get organization
+                cur.execute("SELECT name, timezone FROM organizations WHERE id = %s LIMIT 1", (org_id,))
+                org = cur.fetchone()
+                if not org:
+                    logger.warning("Settings not found for org_id: %s", org_id)
+                    raise HTTPException(status_code=404, detail="Settings not found")
+                org_name = org["name"]
+                time_zone = org.get("timezone") or "pt"
 
-        # org_id = org.get("id") if org else None
-        # cfg = await get_org_settings(org_id)
-        # print(f"General Settings: {org}")
-        # if not cfg:
-
-        if not org:
-            logger.warning("Settings not found for org_id: %s", org_id)
-            raise HTTPException(status_code=404, detail="Settings not found")
-        logger.info("General settings fetched successfully for org_id: %s", org_id)
-
-        rp = await db_module.db.retention_policies.find_one({"org_id": org_id})
-        
-        # retention_days = int(rp.get("retention_days")/30)
-        retention_days = str(rp.get("retention_days"))
-        
+                # Get retention policy
+                cur.execute("SELECT retention_days FROM retention_policies WHERE org_id = %s LIMIT 1", (org_id,))
+                rp = cur.fetchone()
+                retention_days = str(rp["retention_days"]) if rp and rp.get("retention_days") is not None else ""
 
         organization = {
             "name": org_name,
             "timezone": time_zone,
-            # "id": org.get("id"),
-            # "slug": org.get("slug"),
-            # "status": org.get("status"),
-            # "settings_json": org.get("settings_json", {}),
         }
-
         retention = {
-            # "retentionPolicy" : f"{retention_days} Months",
-            "retention_days" : retention_days,
+            "retention_days": retention_days,
         }
-
         generalSettings = {
             "organization": organization,
             "retention": retention,
         }
-
         logger.debug(f"General Settings Data: {generalSettings}")
         return {
             "generalSettings": generalSettings,
             "org_id": org_id,
             "role": role,
-            "success" : "General settings fetched successfully",
+            "success": "General settings fetched successfully",
         }
-
-
     except Exception as e:
         logger.error(f"Failed to fetch general settings: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch general settings")
 
 
-@router.put("/", dependencies=[Depends(require_role(["Admin"]))])
-# @router.patch("")
+@router.patch("", dependencies=[Depends(require_role(["Admin"]))])
 async def patch_general_settings(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
     try:
-        # user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
-        # user_id = "b6ee4982-b5ec-425f-894d-4324adce0f36" #rv
-        # user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
-        print("user:", user)
         user_id = user.get("id")
-        print("User ID:", user_id)
-        membership = await db_module.db.organization_memberships.find_one({"user_id": user_id})
+        logger.info("Updating general settings for user")
+        with get_pg_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                # Get membership
+                cur.execute("SELECT org_id FROM organization_memberships WHERE user_id = %s LIMIT 1", (user_id,))
+                membership = cur.fetchone()
+                if not membership:
+                    logger.warning(f"No membership found for user_id: {user_id}")
+                    raise HTTPException(status_code=404, detail="User membership not found")
+                org_id = membership["org_id"]
 
-        org_id = membership.get("org_id")
-        org = await db_module.db.organizations.find_one({"id": org_id})
+                # Check org exists
+                cur.execute("SELECT id FROM organizations WHERE id = %s LIMIT 1", (org_id,))
+                org = cur.fetchone()
+                if not org:
+                    logger.warning("Organization not found for org_id: %s", org_id)
+                    raise HTTPException(status_code=404, detail="Organization not found")
 
-        if not org:
-            logger.warning("Organization not found for org_id: %s", org_id)
-            raise HTTPException(status_code=404, detail="Organization not found")
+                # Update organizations
+                update_data = {}
+                rp_update_data = {}
+                update_data["name"] = payload["organization"]["name"]
+                update_data["timezone"] = payload["organization"]["timezone"]
+                rp_update_data["retention_days"] = payload["retention"]["retention_days"]
 
-        rp = await db_module.db.retention_policies.find_one({"org_id": org_id})
+                if update_data:
+                    cur.execute(
+                        "UPDATE organizations SET name = %s, timezone = %s WHERE id = %s",
+                        (update_data["name"], update_data["timezone"], org_id)
+                    )
 
-        update_data = {}
-        rp_update_data = {}
-    
-        update_data["name"] = payload["organization"]["name"]
-        update_data["timezone"] = payload["organization"]["timezone"]
-        rp_update_data["retention_days"] = payload["retention"]["retention_days"]
-      
-        if update_data:
-            await db_module.db.organizations.update_one({"id": org_id}, {"$set": update_data})
-
-        if rp_update_data:
-            await db_module.db.retention_policies.update_one({"org_id": org_id}, {"$set": rp_update_data})
-
-        # payload["org_id"] = org_id
-        # updated = await upsert_org_settings(payload)
-        # logger.info(f"General settings updsated for org_id: {org_id}")
+                if rp_update_data:
+                    cur.execute(
+                        "UPDATE retention_policies SET retention_days = %s WHERE org_id = %s",
+                        (rp_update_data["retention_days"], org_id)
+                    )
+                conn.commit()
 
         generalSettings = {
-                    "organization": update_data,
-                    "retention": rp_update_data,
+            "organization": update_data,
+            "retention": rp_update_data,
         }
-
         logger.debug(f"Updated General Settings Data: {generalSettings}")
-
         return {
             "generalSettings": generalSettings,
-            # "org_id": org_id,
-            # "role": role,
             "success": "General settings update successfully",
         }
-    
     except Exception as e:
         logger.error(f"Failed to update general settings: {e}")
         raise HTTPException(status_code=500, detail="Failed to update general settings")

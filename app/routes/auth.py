@@ -18,9 +18,11 @@ from ..common.db.models import OrganizationMembership
 from ..services.auth_deps import get_current_user
 from fastapi import Request
 import bson
+import psycopg2
 from jose import jwt, JWTError
 from typing import Dict, Any
 from app.common.db.db import init_db
+from app.common.db.pg_db import get_pg_conn
 DB = init_db()
 
 
@@ -95,11 +97,18 @@ class ChangePasswordRequest(BaseModel):
 
 
 async def _get_user_by_email(email: str) -> dict | None:
-    return await db_module.db.users.find_one({"email": email})
+    with get_pg_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM users WHERE email = %s LIMIT 1", (email,))
+            user_row = cur.fetchone()
+            return user_row
 
 
 async def _get_user_by_id(user_id: str) -> dict | None:
-    return await db_module.db.users.find_one({"id": user_id})
+    with get_pg_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM users WHERE id = %s LIMIT 1", (user_id,))
+            return cur.fetchone()
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
@@ -108,83 +117,53 @@ async def register(payload: RegisterRequest) -> Any:
     if existing:
         raise HTTPException(status_code=400, detail="User already exists")
 
-    user_doc = {
-        "email": payload.email,
-        "password_hash": hash_password(payload.password),
-        "full_name": payload.full_name,
-        "is_active": True,
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow(),
-        # generate id consistent with earlier model (we used uuid4 str in models.py)
-        "id": payload.email + "-" + str(int(datetime.utcnow().timestamp())),  # small dev id
-    }
-    await db_module.db.users.insert_one(user_doc)
-    # For convenience, create a refresh token entry
-    access = create_access_token(user_doc["id"])
-    refresh = create_refresh_token(user_doc["id"])
-    # persist the refresh token (by jti) for rotation / blacklisting
-    decoded_refresh = decode_token(refresh)
-    refresh_doc = {
-        "jti": decoded_refresh.get("jti"),
-        "user_id": user_doc["id"],
-        "created_at": datetime.utcnow(),
-        "expires_at": datetime.fromtimestamp(decoded_refresh.get("exp")),
-    }
-    await db_module.db.refresh_tokens.insert_one(refresh_doc)
+    user_id = payload.email + "-" + str(int(datetime.utcnow().timestamp()))
+    now = datetime.utcnow()
+    with get_pg_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO users (id, email, password_hash, full_name, is_active, created_at, updated_at) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                (user_id, payload.email, hash_password(payload.password), payload.full_name, True, now, now)
+            )
+            access = create_access_token(user_id)
+            refresh = create_refresh_token(user_id)
+            decoded_refresh = decode_token(refresh)
+            cur.execute(
+                "INSERT INTO refresh_tokens (jti, user_id, created_at, expires_at) VALUES (%s,%s,%s,%s)",
+                (decoded_refresh.get("jti"), user_id, now, datetime.fromtimestamp(decoded_refresh.get("exp")))
+            )
+            conn.commit()
     return {"message": "user created", "access_token": access, "refresh_token": refresh}
 
 
 @router.post("/login", response_model=LoginResponse)
 async def login(payload: LoginRequest) -> Any:
     user = await _get_user_by_email(payload.email)
-    print("user logged in -----> ", user)
+    print("user-----> ", user)
     if not user or not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials. Please check username and password")
-
     if not user.get("is_active", True):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User inactive")
-
     access = create_access_token(user["id"])
     refresh = create_refresh_token(user["id"])
-
-    print()
-    print("access", access)
-    print()
-    print("refresh", refresh)
-    print()
-
-    # store refresh token (rotation)
     dec = decode_token(refresh)
-    refresh_doc = {
-        "jti": dec.get("jti"),
-        "user_id": user["id"],
-        "created_at": datetime.utcnow(),
-        "expires_at": datetime.fromtimestamp(dec.get("exp")),
-    }
-    await db_module.db.refresh_tokens.insert_one(refresh_doc)
-
+    now = datetime.utcnow()
+    with get_pg_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO refresh_tokens (jti, user_id, created_at, expires_at) VALUES (%s,%s,%s,%s)",
+                (dec.get("jti"), user["id"], now, datetime.fromtimestamp(dec.get("exp")))
+            )
+            # Get org details
+            cur.execute("SELECT org_id, role FROM organization_memberships WHERE user_id = %s LIMIT 1", (user["id"],))
+            org_details = cur.fetchone()
     expires_in = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 30
-    # org_details = OrganizationMembership.find_one({"email": user["email"]})
-
-    user_id = user.get("id")
-    print("User ID:", user_id)
-
-    # org_details = db_module.db.organization_memberships.find_one({"user_id": user_id})
-    org_details = await db_module.db.organization_memberships.find_one({"user_id": user_id})
-
     if org_details:
-        org_id = org_details.get("org_id")
-        role = org_details.get("role")
-
+        org_id = org_details[0]
+        role = org_details[1]
     else:
-        print(" N/A")
         org_id = "N/A"
         role = "N/A"
-
-    print("org_id------>>>> ", org_id)
-    print("role------>>>> ", role)
-
-    # Add user details to response
     user_details = {
         "id": user.get("id"),
         "email": user.get("email"),
@@ -192,10 +171,6 @@ async def login(payload: LoginRequest) -> Any:
         "org_id": org_id,
         "role": role,
     }
-
-    print("user_details--> ", user_details)
-
-
     return {
         "message": "Login Successful",
         "access_token": access,
@@ -239,51 +214,30 @@ async def refresh(payload: RefreshRequest) -> Any:
 
 
     # check refresh token exists (rotation / blacklist)
-    stored = await db_module.db.refresh_tokens.find_one({"jti": jti})
-    print("stored", stored)
-    if not stored:
-        raise HTTPException(status_code=401, detail="Refresh token revoked or not found")
-
-    # # Blacklist old token
-    # await db_module.db.refresh_token_blacklist.insert_one({
-    #     "jti": jti,
-    #     "revoked_at": datetime.utcnow(),
-    # })
-    
-    user_id = decoded.get("sub")
-    print(":user_id", user_id)
-
-    # rotate: delete old refresh, issue a new one
-    await db_module.db.refresh_tokens.delete_one({"jti": jti})
-
-    # Create new refresh token
-    new_refresh = create_refresh_token(user_id)
-    print("new_refresh", new_refresh)
-    new_dec = decode_token(new_refresh)
-    print("new_dec", new_dec)
-    await db_module.db.refresh_tokens.insert_one(
-        {
-            "jti": new_dec.get("jti"),
-            "user_id": user_id,
-            "created_at": datetime.utcnow(),
-            "expires_at": datetime.fromtimestamp(new_dec.get("exp")),
-        }
-    )
-
-    # Create new access token
+    with get_pg_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM refresh_tokens WHERE jti = %s LIMIT 1", (jti,))
+            stored = cur.fetchone()
+            if not stored:
+                raise HTTPException(status_code=401, detail="Refresh token revoked or not found")
+            # rotate: delete old refresh, issue a new one
+            cur.execute("DELETE FROM refresh_tokens WHERE jti = %s", (jti,))
+            new_refresh = create_refresh_token(user_id)
+            new_dec = decode_token(new_refresh)
+            cur.execute(
+                "INSERT INTO refresh_tokens (jti, user_id, created_at, expires_at) VALUES (%s,%s,%s,%s)",
+                (new_dec.get("jti"), user_id, datetime.utcnow(), datetime.fromtimestamp(new_dec.get("exp")))
+            )
+            conn.commit()
     access = create_access_token(user_id)
-    print("access", access)
-    
     expires_in = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
-    print("expires_in",expires_in)
-
     return {
         "access_token": access,
         "refresh_token": new_refresh,
         "expires_in": expires_in,
         "token_type": "bearer",
         "msg": "Token refreshed successfully"
-        }
+    }
 
 
 @router.post("/request-password-reset")
@@ -418,18 +372,17 @@ async def reset_password(payload: ResetPasswordRequest) -> Any:
     print("user_id", user_id)
     # db = get_db()
     # user = await db.users.find_one({"id": user_id})
-    user = await db_module.db.users.find_one({"id": user_id})
-    print("user", user)
-    if not user:
-        raise HTTPException(status_code=400, detail="Invalid token")
-    
-    await DB.users.update_one({"id": user_id}, {"$set": {"password_hash": hash_password(new_password), "updated_at": datetime.utcnow()}})
-    print("Done Done Done Done Done Done Done")
-    print("Done Done Done Done Done Done Done")
-    print("Done Done Done Done Done Done Done")
-    print("Done Done Done Done Done Done Done")
-    print("Done Done Done Done Done Done Done")
-    # await send_reset_confirmation_email(user["email"], user.get("full_name", ""))
+    with get_pg_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM users WHERE id = %s LIMIT 1", (user_id,))
+            user = cur.fetchone()
+            if not user:
+                raise HTTPException(status_code=400, detail="Invalid token")
+            cur.execute(
+                "UPDATE users SET password_hash = %s, updated_at = %s WHERE id = %s",
+                (hash_password(new_password), datetime.utcnow(), user_id)
+            )
+            conn.commit()
     return {"detail": "Password reset successful"}
 
 
@@ -447,11 +400,10 @@ async def logout(payload: LogoutRequest, request: Request):
             raise HTTPException(status_code=400, detail="Invalid token type for logout.")
         jti = decoded.get("jti")
         # Remove the refresh token from DB (blacklist/rotation)
-        result = await db_module.db.refresh_tokens.delete_one({"jti": jti})
-        if result.deleted_count == 0:
-            logger.info(f"Logout: refresh token not found or already invalidated (jti={jti})")
-        else:
-            logger.info(f"Logout: refresh token invalidated (jti={jti})")
+        with get_pg_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM refresh_tokens WHERE jti = %s", (jti,))
+                conn.commit()
         return {"message": "Logged out successfully."}
     except Exception as exc:
         logger.error(f"Logout error: {type(exc).__name__}: {str(exc)}")
@@ -474,33 +426,33 @@ async def change_password(payload: ChangePasswordRequest, user: dict = Depends(g
         user_id = user.get("id")
         print("User ID:", user_id)
 
-        try:
-            user = await _get_user_by_id(user_id)
-        except:
-            logger.error(f"User not found: {user_id}")
-            raise HTTPException(status_code=404, detail="User not found")
-        
-        # Verify old password
-        if not verify_password(payload.old_password, user["password_hash"]):
-            logger.warning(f"Change password failed: invalid old password for user {user['id']}")
-            raise HTTPException(status_code=400, detail="Invalid old password")
-
-        # Update password
-        new_hash = hash_password(payload.new_password)
-        await db_module.db.users.update_one({"id": user["id"]}, {"$set": {"password_hash": new_hash, "updated_at": datetime.utcnow()}})
-
-        # Revoke all refresh tokens for this user
-        await db_module.db.refresh_tokens.delete_many({"user_id": user["id"]})
-
-        # Log email event (dev notification)
+        with get_pg_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("SELECT * FROM users WHERE id = %s LIMIT 1", (user_id,))
+                user_row = cur.fetchone()
+                if not user_row:
+                    logger.error(f"User not found: {user_id}")
+                    raise HTTPException(status_code=404, detail="User not found")
+                # Verify old password
+                if not verify_password(payload.old_password, user_row["password_hash"]):
+                    logger.warning(f"Change password failed: invalid old password for user {user_row['id']}")
+                    raise HTTPException(status_code=400, detail="Invalid old password")
+                # Update password
+                new_hash = hash_password(payload.new_password)
+                cur.execute(
+                    "UPDATE users SET password_hash = %s, updated_at = %s WHERE id = %s",
+                    (new_hash, datetime.utcnow(), user_row["id"])
+                )
+                # Revoke all refresh tokens for this user
+                cur.execute("DELETE FROM refresh_tokens WHERE user_id = %s", (user_row["id"],))
+                conn.commit()
         await send_email_stub(
-            to_email=user["email"],
+            to_email=user_row["email"],
             subject="Your password was changed",
             template_name="password_changed",
-            payload={"user_id": user["id"]},
+            payload={"user_id": user_row["id"]},
         )
-
-        logger.info(f"Password changed successfully for user {user['id']}")
+        logger.info(f"Password changed successfully for user {user_row['id']}")
         return {"message": "Password changed successfully"}
     except HTTPException:
         raise

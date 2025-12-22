@@ -1,15 +1,12 @@
+import psycopg2
+from app.common.db.pg_db import get_pg_conn
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from typing import Dict, Any, Optional
 from ..services.auth_deps import get_current_user
-import app.common.db.db as db_module
 from ..utils.logger import get_logger
 from datetime import datetime
 import os
-from bson import ObjectId
-
-from app.common.db.db import init_db
-DB = init_db()
 
 logger = get_logger(__name__)
 
@@ -56,58 +53,47 @@ async def get_user_profile(user: Dict[str, Any] = Depends(get_current_user)):
         # user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
         user_id = user.get("id")
         print("User ID:", user_id)
-
-        print("user_id-----> ", user_id)
-        
         logger.info(f"Fetching user profile for user_id: {user_id}")
-
-        # Get user details
-        user_data = await db_module.db.users.find_one({"id": user_id})
-        user_prof_data = await db_module.db.user_profiles.find_one({"user_id": user_id})
-        if not user_data:
-            logger.warning(f"User not found: {user_id}")
-            raise HTTPException(status_code=404, detail="User not found")
-        
-        full_name = user_data.get("full_name")
-        parts = full_name.strip().split()
-        first_name = parts[0] if parts else ""
-        last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
-
-        # Get organization membership and role
-        membership = await db_module.db.organization_memberships.find_one({"user_id": user_id})
-        if not membership:
-            logger.warning(f"Organization membership not found for user_id: {user_id}")
-            raise HTTPException(status_code=404, detail="Organization membership not found")
-        
-        org_id = membership.get("org_id")
-        role = membership.get("role")
-        
-        # Get organization details
-        org = await db_module.db.organizations.find_one({"id": org_id})
-        org = clean_mongo_doc(org)
-        org_name = org.get("name") if org else None
-        print("org_name-----> ", org_name)
-
-
+        with get_pg_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("SELECT * FROM users WHERE id = %s LIMIT 1", (user_id,))
+                user_data = cur.fetchone()
+                cur.execute("SELECT * FROM user_profiles WHERE user_id = %s LIMIT 1", (user_id,))
+                user_prof_data = cur.fetchone()
+                if not user_data:
+                    logger.warning(f"User not found: {user_id}")
+                    raise HTTPException(status_code=404, detail="User not found")
+                full_name = user_data.get("full_name", "")
+                parts = full_name.strip().split()
+                first_name = parts[0] if parts else ""
+                last_name = " ".join(parts[1:]) if len(parts) > 1 else ""
+                cur.execute("SELECT org_id, role FROM organization_memberships WHERE user_id = %s LIMIT 1", (user_id,))
+                membership = cur.fetchone()
+                if not membership:
+                    logger.warning(f"Organization membership not found for user_id: {user_id}")
+                    raise HTTPException(status_code=404, detail="Organization membership not found")
+                org_id = membership.get("org_id")
+                role = membership.get("role")
+                cur.execute("SELECT name FROM organizations WHERE id = %s LIMIT 1", (org_id,))
+                org = cur.fetchone()
+                org_name = org.get("name") if org else None
         profile_data = {
             "personalDetails": {
                 "firstName": first_name,
                 "lastName": last_name,
                 "email": user_data.get("email", ""),
-                "phone": user_prof_data.get("mobile", "N/A"),
+                "phone": user_prof_data.get("mobile", "N/A") if user_prof_data else "N/A",
                 "organization": org_name,
-                "location": user_prof_data.get("location", "N/A"),
-                "timezone": user_prof_data.get("timezone", "pt"),
-                "dateFormat": user_prof_data.get("date_format", "MM/DD/YYYY")
+                "location": user_prof_data.get("location", "N/A") if user_prof_data else "N/A",
+                "timezone": user_prof_data.get("timezone", "pt") if user_prof_data else "pt",
+                "dateFormat": user_prof_data.get("date_format", "MM/DD/YYYY") if user_prof_data else "MM/DD/YYYY"
             },
-            
             "profileDetails": {
                 "email": user_data.get("email", ""),
                 "role": role,
                 "status": "Active" if user_data.get("is_active", True) else "Inactive",
             }
         }
-        
         logger.info(f"User profile fetched successfully for user_id: {user_id}")
         return profile_data
         
@@ -136,71 +122,29 @@ async def update_user_profile(payload: Dict[str, Any], user: Dict[str, Any] = De
         # user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
         user_id = user.get("id")
         print("User ID:", user_id)
-        
-        # Get user details
-        user_data = await db_module.db.users.find_one({"id": user_id})
-        
-        if not user_data:
-            logger.warning(f"User not found: {user_id}")
-            raise HTTPException(status_code=404, detail="User not found")
-        
-        user_data = await db_module.db.users.find_one({"id": user_id})
-        print("user_data------------------> ", user_data)
-
-
-        # updating user details information in user model
-        # usr = await DB.users.find_one({"email": payload["email"]},{"_id": 0})
-        # print("usr------------------> ", usr)
-        # print("usr[id]------------------> ", usr["id"])
-
-        update_user = {}
-        update_user_prof = {}
-        # if "personalDetails" in payload:
-        if payload:
-            logger.info("payload found")
-            logger.info(f"payload: {payload}")
-            logger.info(f"payload[firstName]: {payload.get('firstName')}")
-            logger.info(f"payload[organization]: {payload.get('organization')}")
-
-            if "firstName" in payload and "lastName" in payload:
-                full_name = f"{payload['firstName']} {payload['lastName']}"
-                update_user["full_name"] = full_name
-
-            # if "email" in payload:
-            #     update_user["email"] = payload["email"]
-            
-            if "phone" in payload:
-                update_user_prof["mobile"] = payload["phone"]
-            
-            if "location" in payload:
-                update_user_prof["location"] = payload["location"]
-
-            if "timezone" in payload:
-                update_user_prof["timezone"] = payload["timezone"]
-                # update_data["updated_at"] = datetime.utcnow()
-
-            if "dateFormat" in payload:
-                update_user_prof["date_format"] = payload["dateFormat"]
-
-            logger.info(f"User update data: {update_user}")
-            await DB.users.update_one({"id": user_id}, {"$set": update_user})
-            await DB.user_profiles.update_one({"user_id": user_id}, {"$set": update_user_prof})
-
-
-            # Update organization membership
-            org_update = {}            
-            if "organization" in payload: 
-                org_update["name"] = payload["organization"]
-
-            logger.info(f"Organization update data: {org_update}")
-
-            membership = await db_module.db.organization_memberships.find_one({"user_id": user_id})
-
-            if org_update:
-                await db_module.db.organizations.update_one({"id": membership.get("org_id")}, {"$set": org_update})
-        
+        with get_pg_conn() as conn:
+            with conn.cursor() as cur:
+                # Update user details
+                if "firstName" in payload and "lastName" in payload:
+                    full_name = f"{payload['firstName']} {payload['lastName']}"
+                    cur.execute("UPDATE users SET full_name = %s WHERE id = %s", (full_name, user_id))
+                if "phone" in payload:
+                    cur.execute("UPDATE user_profiles SET mobile = %s WHERE user_id = %s", (payload["phone"], user_id))
+                if "location" in payload:
+                    cur.execute("UPDATE user_profiles SET location = %s WHERE user_id = %s", (payload["location"], user_id))
+                if "timezone" in payload:
+                    cur.execute("UPDATE user_profiles SET timezone = %s WHERE user_id = %s", (payload["timezone"], user_id))
+                if "dateFormat" in payload:
+                    cur.execute("UPDATE user_profiles SET date_format = %s WHERE user_id = %s", (payload["dateFormat"], user_id))
+                # Update organization name if provided
+                if "organization" in payload:
+                    cur.execute("SELECT org_id FROM organization_memberships WHERE user_id = %s LIMIT 1", (user_id,))
+                    membership = cur.fetchone()
+                    if membership:
+                        cur.execute("UPDATE organizations SET name = %s WHERE id = %s", (payload["organization"], membership[0]))
+                conn.commit()
         logger.info(f"User profile updated successfully for user_id: {user_id}")
-        return {"success":"User profile updated successfully"}
+        return {"success": "User profile updated successfully"}
         
     except HTTPException:
         raise
@@ -221,12 +165,14 @@ async def get_profile_pic(user: Dict[str, Any] = Depends(get_current_user)):
         # user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4"  # TODO: Replace with Depends(get_current_user)
         user_id = user.get("id")
         print("User ID:", user_id)
-
-        user_prof_data = await db_module.db.user_profiles.find_one({"user_id": user_id})
-        if not user_prof_data or not user_prof_data.get("profile_pic_path"):
-            logger.warning(f"Profile picture not found for user_id: {user_id}")
-            raise HTTPException(status_code=404, detail="Profile picture not found")
-        file_path = user_prof_data["profile_pic_path"]
+        with get_pg_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute("SELECT profile_pic_path FROM user_profiles WHERE user_id = %s LIMIT 1", (user_id,))
+                user_prof_data = cur.fetchone()
+                if not user_prof_data or not user_prof_data.get("profile_pic_path"):
+                    logger.warning(f"Profile picture not found for user_id: {user_id}")
+                    raise HTTPException(status_code=404, detail="Profile picture not found")
+                file_path = user_prof_data["profile_pic_path"]
         if not os.path.exists(file_path):
             logger.warning(f"Profile picture file not found on disk: {file_path}")
             raise HTTPException(status_code=404, detail="Profile picture file not found")
@@ -261,23 +207,23 @@ async def upload_profile_pic(file: UploadFile = File(...), user: Dict[str, Any] 
         # user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4"  # TODO: Replace with Depends(get_current_user)
         user_id = user.get("id")
         print("User ID:", user_id)
-        user_prof_data = await db_module.db.user_profiles.find_one({"user_id": user_id})
-        if not user_prof_data:
-            logger.warning(f"User not found: {user_id}")
-            raise HTTPException(status_code=404, detail="User not found")
-
+        with get_pg_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT user_id FROM user_profiles WHERE user_id = %s LIMIT 1", (user_id,))
+                user_prof_data = cur.fetchone()
+                if not user_prof_data:
+                    logger.warning(f"User not found: {user_id}")
+                    raise HTTPException(status_code=404, detail="User not found")
         # Validate file type
         allowed_types = ["image/jpeg", "image/png", "image/gif"]
         if file.content_type not in allowed_types:
             logger.warning(f"Invalid file type: {file.content_type}")
             raise HTTPException(status_code=400, detail="Invalid file type. Only JPG, PNG, GIF allowed.")
-
         # Validate file size (max 2MB)
         contents = await file.read()
         if len(contents) > 2 * 1024 * 1024:
             logger.warning(f"File too large: {len(contents)} bytes")
             raise HTTPException(status_code=400, detail="File too large. Max size is 2MB.")
-
         # Save uploaded file to disk
         upload_dir = "uploaded_profile_pics"
         os.makedirs(upload_dir, exist_ok=True)
@@ -285,9 +231,14 @@ async def upload_profile_pic(file: UploadFile = File(...), user: Dict[str, Any] 
         file_path = os.path.join(upload_dir, filename)
         with open(file_path, "wb") as f:
             f.write(contents)
-
-        # Update user profile_pic_path in MongoDB
-        await DB.user_profiles.update_one({"user_id": user_id}, {"$set": {"profile_pic_path": file_path, "updated_at": datetime.utcnow()}})
+        # Update user profile_pic_path in PostgreSQL
+        with get_pg_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE user_profiles SET profile_pic_path = %s, updated_at = %s WHERE user_id = %s",
+                    (file_path, datetime.utcnow(), user_id)
+                )
+                conn.commit()
         logger.info(f"Profile picture uploaded for user_id: {user_id}, path: {file_path}")
         return {"success": True, "profile_pic_path": file_path}
     except HTTPException:
