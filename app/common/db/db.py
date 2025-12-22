@@ -12,11 +12,11 @@ db = None
 def init_db():
     global client, db
     try:
-        logger.info("init_db() CALLED")
+        # logger.info("init_db() CALLED")
         if client is None:
             client = AsyncIOMotorClient(settings.MONGO_URI)
             db = client[settings.MONGO_DB]
-        logger.info("MongoDB client initialized successfully.")
+        # logger.info("MongoDB client initialized successfully.")
         return db
     except Exception as e:
         logger.error(f"Failed to initialize MongoDB client: {e}")

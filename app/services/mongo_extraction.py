@@ -8,7 +8,8 @@ import app.common.db.db as db_module
 
 logger = get_logger(__name__)
 
-def store_extraction_result(file_id: str, ai_result: Dict[str, Any], raw_text: str, payer_name: str, uploaded_by: str) -> str:
+# def store_extraction_result(file_id: str, ai_result: Dict[str, Any], raw_text: str, payer_name: str, uploaded_by: str) -> str:
+def store_extraction_result(file_id: str, ai_result: Dict[str, Any], payer_name: str, uploaded_by: str) -> str:
    
     # Use your actual DB name 
     ext_collection = db_module.db["extraction_results"]  
@@ -32,7 +33,8 @@ def store_extraction_result(file_id: str, ai_result: Dict[str, Any], raw_text: s
         claim_doc = {
             "_id": str(uuid.uuid4()),
             "fileId": file_id,
-            "rawExtracted": raw_text,
+            # "rawExtracted": raw_text,
+            "rawExtracted": "raw_text",
             "claim": flat_claims["section"],
             "aiConfidence": 90,
             "extractionStatus": "success",

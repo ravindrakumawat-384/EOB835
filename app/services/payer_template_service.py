@@ -224,13 +224,45 @@ def store_claims_in_postgres(file_id: str, flat_claims: List[Dict[str, Any]], or
     cur = conn.cursor()
     claim_ids = []
     
+    # Helpers: robust numeric parsing for currency strings ("$1,234.56"), commas, parentheses
+    def _parse_float(v) -> float:
+        try:
+            if v is None:
+                return 0.0
+            if isinstance(v, (int, float)):
+                return float(v)
+            s = str(v).strip()
+            if not s:
+                return 0.0
+            neg = False
+            if s.startswith("(") and s.endswith(")"):
+                neg = True
+                s = s[1:-1]
+            s = s.replace(",", "").replace("$", "").replace("USD", "").strip()
+            import re as _re
+            m = _re.search(r"-?\d+(?:\.\d+)?", s)
+            if not m:
+                return 0.0
+            num = float(m.group(0))
+            return -num if neg else num
+        except Exception:
+            return 0.0
+
+    def _parse_int(v) -> int:
+        try:
+            return int(_parse_float(v))
+        except Exception:
+            return 0
+
     try:
         logger.info(f"📋 Storing {len(flat_claims)} claims as SEPARATE records...")
         
         # Process EACH claim individually - no grouping by payer
         # for i, claim in enumerate(flat_claims, 1):
 
+        print()
         print("flat_claims", flat_claims)
+        print()
         # for i, claim in enumerate(flat_claims):
         # for i, claim in enumerate(flat_claims):
             # logger.info(f"Processing claim {i}/{len(flat_claims)}: {claim.get('claim_number', 'N/A')}")
@@ -242,13 +274,15 @@ def store_claims_in_postgres(file_id: str, flat_claims: List[Dict[str, Any]], or
             # payer_id = get_or_create_payer(payer_name, org_id)
 
         payer_name = payer_name
-        payer_id = payer_id
+        payer_id = "b29354dc-5796-41dd-bcd1-244b0ea184f2"
         print("payer_id=====", payer_id)
             
         # Create SEPARATE payment record for EACH claim
         payment_id = str(uuid.uuid4())
-        payment_ref = flat_claims["payment_reference"]
-        claim_amount = flat_claims["claim_payment"]
+        payment_ref = "0000"
+        if flat_claims.get("payment_reference"):
+            payment_ref = flat_claims.get("payment_reference")
+        claim_amount = _parse_float(flat_claims.get("claim_payment"))
             
         cur.execute("""
             INSERT INTO payments (
@@ -261,6 +295,13 @@ def store_claims_in_postgres(file_id: str, flat_claims: List[Dict[str, Any]], or
         ))
         
         # Create SEPARATE claim record
+        # Pre-parse numeric fields to avoid invalid numeric input errors
+        billed_amt = _parse_float(flat_claims.get("payment"))
+        allowed_amt = _parse_float(flat_claims.get("claim_payment"))
+        paid_amt = _parse_float(flat_claims.get("total_paid"))
+        adj_amt = _parse_float(flat_claims.get("adj_amount"))
+        units_val = _parse_int(flat_claims.get("units"))
+
         claim_id = str(uuid.uuid4())
         cur.execute("""
             INSERT INTO claims (
@@ -272,17 +313,17 @@ def store_claims_in_postgres(file_id: str, flat_claims: List[Dict[str, Any]], or
         """, (
             claim_id, payment_id, file_id, 
 
-            flat_claims["claim_number"],
-            flat_claims["patient_name"],
-            flat_claims["patient_id"],
+            flat_claims.get("claim_number"),
+            flat_claims.get("patient_name"),
+            flat_claims.get("patient_id"),
             payer_name,
-            flat_claims["payment"],
-            flat_claims["claim_payment"],
-            flat_claims["total_paid"],
-            flat_claims["adj_amount"], 
-            flat_claims["claim_status_code"],
-            flat_claims["dates_of_service"],
-            flat_claims["dates_of_service"],
+            billed_amt,
+            allowed_amt,
+            paid_amt,
+            adj_amt,
+            flat_claims.get("claim_status_code"),
+            flat_claims.get("dates_of_service"),
+            flat_claims.get("dates_of_service"),
             90,  # Store AI confidence as validation_score
             'extracted'
 
@@ -302,13 +343,13 @@ def store_claims_in_postgres(file_id: str, flat_claims: List[Dict[str, Any]], or
             # service_line_id, claim_id, j,
             service_line_id, claim_id,
             1,
-            flat_claims["procedure_code"],
-            flat_claims["dates_of_service"],
-            flat_claims["dates_of_service"],
-            flat_claims["payment"],
-            flat_claims["claim_payment"],
-            flat_claims["payment"],
-            flat_claims["units"]
+            flat_claims.get("procedure_code"),
+            flat_claims.get("dates_of_service"),
+            flat_claims.get("dates_of_service"),
+            billed_amt,
+            allowed_amt,
+            paid_amt,
+            units_val,
         ))
         
         claim_ids.append(claim_id)

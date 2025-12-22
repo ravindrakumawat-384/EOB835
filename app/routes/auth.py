@@ -1,4 +1,3 @@
-
 from typing import Any
 from fastapi import APIRouter, HTTPException, status, Depends, Body
 from pydantic import BaseModel, EmailStr
@@ -419,10 +418,6 @@ async def change_password(payload: ChangePasswordRequest, user: dict = Depends(g
     Verifies old password, updates to new password, and revokes all refresh tokens for security.
     """ 
     try:
-        # user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
-        # user_id = "b6ee4982-b5ec-425f-894d-4324adce0f36" # rv
-        # user_id = "b73536ad-eba2-4d48-9306-5e479fbf8058" # rv
-        # user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
         user_id = user.get("id")
         print("User ID:", user_id)
 
