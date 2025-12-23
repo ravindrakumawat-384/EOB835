@@ -7,9 +7,11 @@ import os
 import re
 import datetime
 from app.common.db.review_listing_schema import *
-from ..services.pg_upload_files import get_pg_conn
+# from ..services.pg_upload_files import get_pg_conn
+from app.common.db.pg_db import get_pg_conn
 from pydantic import BaseModel
 from app.common.db.db import init_db
+from ..services.auth_deps import get_current_user, require_role
 
 DB = init_db()
 logger = get_logger(__name__)
@@ -70,6 +72,7 @@ router = APIRouter(prefix="/review_queue", tags=["review"])
 
 @router.get("/summary", response_model=None, response_model_exclude_none=True)
 async def review_queue(
+    user: Dict[str, Any] = Depends(get_current_user),
     org_id: str = Query(...),
     search: Optional[str] = Query(None),
     payer: Optional[str] = Query("all"),
@@ -81,6 +84,14 @@ async def review_queue(
 ):
     try:
         pg = get_pg_conn()
+
+        # user_id = user.get("id")
+    
+        # cur = pg.cursor()
+        # cur.execute("""SELECT org_id, role FROM organization_memberships WHERE user_id = %s LIMIT 1
+        #             """, (user_id,))
+        # membership = cur.fetchone()
+        # org_id = membership[0]
 
         if status == "pending":
             status = "pending_review"
@@ -138,7 +149,7 @@ async def review_queue(
                     "options": reviewer_options,
                 },
             },
-            {"field": "uploaded", "label": "Uploaded"},
+            {"field": "uploaded", "label": "Uploaded", "isDate": True},
             {
                 "label": "Actions",
                 "actions": [
@@ -261,10 +272,10 @@ async def review_queue(
                         "claim_id": claim_line_id, 
                         "fileName": filename,
                         "payer": ext.get("payerName") or payer_name or "Unknown",
-                        "confidence": f"{int(conf_val)}%",
+                        "confidence": f"{int(conf_val)}",
                         "status": status,
                         "reviewer": reviewer_ids or "Unassigned",
-                        "uploaded": uploaded_at.strftime("%Y-%m-%d"),
+                        "uploaded": uploaded_at,
                     }
                 )
 

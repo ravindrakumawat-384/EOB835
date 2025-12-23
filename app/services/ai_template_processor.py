@@ -345,7 +345,7 @@ def extract_dynamic_keys_from_text(raw_text: str) -> list:
                 """
 
         response = client.chat.completions.create(
-            model="gpt-4.1-mini",
+            model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
             max_tokens=1200

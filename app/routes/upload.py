@@ -10,7 +10,8 @@ from app.services.file_validation import (
 )
 from app.services.s3_service import S3Service
 from app.common.config import settings
-from app.services.pg_upload_files import insert_upload_file, update_file_status, mark_processing_failed, get_pg_conn
+from app.services.pg_upload_files import insert_upload_file, update_file_status, mark_processing_failed
+from app.common.db.pg_db import get_pg_conn
 from app.services.file_content_validator import comprehensive_file_validation
 from ..services.auth_deps import get_current_user, require_role
 from app.services.mongo_extraction import extract_json_ai, store_extraction_result
@@ -22,6 +23,7 @@ from app.common.db.db import init_db
 import uuid
 import datetime
 import app.common.db.db as db_module
+from ..services.auth_deps import get_current_user, require_role
 
 
 DB = init_db()
@@ -41,13 +43,19 @@ MAX_FILE_SIZE_MB = 50
 MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024
 
 @router.post("/files", status_code=status.HTTP_200_OK)
-# async def upload_files(user: Dict[str, Any] = Depends(get_current_user), files: List[UploadFile] = File(...)) -> Dict[str, Any]:
+async def upload_files(user: Dict[str, Any] = Depends(get_current_user), files: List[UploadFile] = File(...)) -> Dict[str, Any]:
 
-async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
     """
     Upload one or more files, validate size, corruption, hash, and format.
     Returns status and message per file.
     """
+    user_id = user.get("id")
+    conn = get_pg_conn()
+    cur = conn.cursor()
+    cur.execute("""SELECT org_id, role FROM organization_memberships WHERE user_id = %s LIMIT 1
+                """, (user_id,))
+    membership = cur.fetchone()
+    org_id = membership[0]
     responses = []
     ext_collection = db_module.db["extraction_results"]  
     claim_version = db_module.db["claim_version"]  
@@ -83,16 +91,16 @@ async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
             continue
         # 6. Store metadata in PostgreSQL
         # Replace these with actual values from context/session/request
-        org_id = "9ac493f7-cc6a-4d7d-8646-affb00ed58da"
-        # org_id = "57a0f4e2-8076-4910-8259-9d06338965e9"
+   
         batch_id = None
         mime_type = file.content_type or "application/octet-stream"
         logger.info(f"Processing file: {file.filename}, size: {len(content)}, mime_type: {mime_type}")
         file_size = len(content)
         upload_source = "manual"
-        # uploaded_by = "b729c531-7c90-4602-b541-e910d45b0a0d"  
-        uploaded_by = "e3a84bea-8c81-47fa-9009-ca71e94105d8"
-        # uploaded_by = "57a0f4e2-8076-4910-8259-9d06338965e9"  
+        
+        uploaded_by = user_id
+
+        
         file_id = insert_upload_file(
             org_id=org_id,
             batch_id=batch_id,
@@ -114,26 +122,12 @@ async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
         cur.close()
         pg.close()
 
-        print('payer_names----->', str(payer_names[0]))
 
         # 7. Extract text from file (universal for PDF, DOCX, TXT, image)
 
         raw_text = extract_text_from_file(content, file.filename, mime_type)
         logger.info(f"Extracted text for {file.filename} (first 200 chars): {raw_text[:200]}")
         
-
-        print()
-        print()
-        print()
-        print()
-        print()
-        print()
-        print("Raw text operation start=======================")
-        print("Raw text operation start=======================")
-        print("Raw text operation start=======================")
-        print()
-        print()
-
         import re
         from typing import List
 
@@ -151,28 +145,6 @@ async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
 
         # print("Splited Raws text========>>  ", split_claim_blocks(raw_text))
 
-
-        print()
-        print()
-        print("Raw text operation End===========================")
-        print("Raw text operation End===========================")
-        print("Raw text operation End===========================")
-        print()
-        print()
-        print()
-        print()
-        print()
-        print()
-
-
-
-
-
-
-
-
-
-
         # Check if any payer name is present in the extracted text
         matched_payer_name = ''
         if payer_names and raw_text:
@@ -185,22 +157,16 @@ async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
                     matched_payer_name = payer_db_name
                     break
         print('Matched payer name in extracted text:', matched_payer_name)
-        print('Matched payer name in extracted text:', matched_payer_name)
-        print('Matched payer name in extracted text:', matched_payer_name)
-        print('Matched payer name in extracted text:', matched_payer_name)
-        print('Matched payer name in extracted text:', matched_payer_name)
-        print('Matched payer name in extracted text:', matched_payer_name)
+    
 
         pg = get_pg_conn()
         cur = pg.cursor()
         cur.execute("SELECT id FROM payers WHERE name = %s AND org_id = %s", (matched_payer_name, org_id))
         payer_id = cur.fetchone()
         if payer_id:
-            print("==if==")
             cur.execute("SELECT id FROM templates WHERE payer_id = %s", (payer_id,))
             template_id = cur.fetchone()
         else:
-            print("==else==")
             cur.execute(
                 """
                 UPDATE upload_files
@@ -259,62 +225,18 @@ async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
             continue
         
         # 8. AI extraction: use AI model to convert text to JSON
-
-
-
-
-        # operation start
-        print("===============================================")
-
-
-        print("Starting AI extraction for file:", file.filename)
-        print("Using dynamic keys:", dynamic_key)
-        print("Extracted raw text (first 500 chars):", raw_text)
-
-        print("===============================================")
-        # operation end
-
-
-
-
-        print()
-        print()
-        print()
-        print()
-        print()
-        print()
-        print("End End End End End End End End End End End End End ................................................")
-        print()
-        print()
-        print()
-        print()
-        print()
-        print()
-        print()
-        print()
-
-
-        claims = []
+        import asyncio
+        
+        claim_blocks = split_claim_blocks(raw_text)
+        tasks = [ai_extract_claims(block, dynamic_key) for block in claim_blocks]
+        
+        # Run all extractions in parallel
+        claims = await asyncio.gather(*tasks)
+        
         flat_claims_list = []
-        # ai_result = []
-        for claim_text in split_claim_blocks(raw_text):
-            # print("Claim Text for AI extraction:", claim_text)
-            print()
-            claim_json = ai_extract_claims(claim_text,dynamic_key)
-            # print("Extracted Claim JSON:", claim_json)
-            claims.append(claim_json)
-
-            print("Flattened claims start---> ")
+        for claim_json in claims:
             f_claims = flatten_claims2(claim_json)
             flat_claims_list.append(f_claims)
-            print("Flattened claims End---> ")
-
-        print()
-        print()
-        # print("claims==================>>  ", claims)
-        print()
-        print()
-
 
         # print("Flattened claims start---> ")
         # for claim in claims:
