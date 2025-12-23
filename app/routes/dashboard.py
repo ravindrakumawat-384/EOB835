@@ -6,7 +6,9 @@ import app.common.db.db as db_module
 from ..utils.logger import get_logger
 from datetime import datetime, timezone
 from ..common.db.dashboard_schemas import DashboardResponse
-from ..services.pg_upload_files import get_pg_conn
+# from ..services.pg_upload_files import get_pg_conn
+from app.common.db.pg_db import get_pg_conn
+from ..services.auth_deps import get_current_user, require_role
 import psycopg2
 
 #log maintainer
@@ -30,12 +32,19 @@ def covert_date_time(value):
     
 
 @router.get("/summary", response_model=DashboardResponse)
-async def dashboard_summary() -> JSONResponse:
+async def dashboard_summary(user: Dict[str, Any] = Depends(get_current_user)) -> JSONResponse:
     """
     Dashboard summary (org-scoped) using upload_batches, upload_files, payers.
     """
     try:
-        org_id = "9ac493f7-cc6a-4d7d-8646-affb00ed58da"
+        user_id = user.get("id")
+        print('user_id==================', user_id)
+        conn = get_pg_conn()
+        cur = conn.cursor()
+        cur.execute("""SELECT org_id, role FROM organization_memberships WHERE user_id = %s LIMIT 1
+                """, (user_id,))
+        membership = cur.fetchone()
+        org_id = membership[0]
         if not org_id:
             raise HTTPException(status_code=400, detail="org_id required in user context")
         # MongoDB stats for accuracy from extraction_results collection
@@ -65,8 +74,8 @@ async def dashboard_summary() -> JSONResponse:
         exceptions = 0
         needs_template = 0
         # PostgreSQL stats
-        conn = get_pg_conn()
-        cur = conn.cursor()
+        # conn = get_pg_conn()
+        # cur = conn.cursor()
         # File stats
         cur.execute("SELECT COUNT(*) FROM upload_files WHERE org_id = %s", (org_id,))
         pg_uploaded = cur.fetchone()[0]
