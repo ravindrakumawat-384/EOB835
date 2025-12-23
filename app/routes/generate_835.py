@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
@@ -7,12 +7,14 @@ import os
 import datetime
 import json
 import uuid
-from app.services.pg_upload_files import get_pg_conn
+# from app.services.pg_upload_files import get_pg_conn
+from app.common.db.pg_db import get_pg_conn
 from app.services.s3_service import S3Service
 from app.common.config import settings
 from app.common.db.db import init_db
 from ..utils.logger import get_logger
 from openai import AsyncOpenAI
+from ..services.auth_deps import get_current_user, require_role
 
 DB = init_db()
 logger = get_logger(__name__)
@@ -34,8 +36,8 @@ s3_client = S3Service(S3_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_R
 
 class Generate835Request(BaseModel):
     claim_id: str  # The claim ID to fetch from database
-    org_id: str  # Organization ID (UUID format)
-    generated_by: Optional[str] = None  # User ID who generated the export
+    # org_id: str  # Organization ID (UUID format)
+    # generated_by: Optional[str] = None  # User ID who generated the export
     
 class Generate835Response(BaseModel):
     message: str
@@ -307,9 +309,20 @@ def extract_field_from_claim(claim_json: dict, field_name: str):
 
 
 @router.post("/", response_model=Generate835Response)
-async def generate_835_file(request: Generate835Request):
+async def generate_835_file(request: Generate835Request, user: str = Depends(get_current_user)):
     try:
         # 1) Fetch claim JSON (Mongo)
+
+        user_id = user.get("id")
+        conn = get_pg_conn()
+        cur = conn.cursor()
+        cur.execute("""SELECT org_id, role FROM organization_memberships WHERE user_id = %s LIMIT 1
+                """, (user_id,))
+        membership = cur.fetchone()
+        org_id = membership[0]
+        cur.close()
+        conn.close()
+
         claim_collection = DB["claim_version"]
         extraction_result = DB["extraction_results"]
         claim_doc = await claim_collection.find_one(
@@ -330,9 +343,6 @@ async def generate_835_file(request: Generate835Request):
         if claim_status == 'generated':
             return {"status": "already_generated"}
         
-        
-
-        # try:
         # 2) AI generates 835
         edi_text = await generate_835_with_ai(ai_client, claim_json)
         # 3) Validate
@@ -346,10 +356,10 @@ async def generate_835_file(request: Generate835Request):
         
         export_id, export_ref = save_export_records(
             conn,
-            org_id=request.org_id,
+            org_id=org_id,
             claim_id=request.claim_id,
             s3_path=s3_path,
-            generated_by=request.generated_by
+            generated_by=user_id
         )
 
         # Extract required fields from claim data

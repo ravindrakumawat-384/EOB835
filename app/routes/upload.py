@@ -10,7 +10,8 @@ from app.services.file_validation import (
 )
 from app.services.s3_service import S3Service
 from app.common.config import settings
-from app.services.pg_upload_files import insert_upload_file, update_file_status, mark_processing_failed, get_pg_conn
+from app.services.pg_upload_files import insert_upload_file, update_file_status, mark_processing_failed
+from app.common.db.pg_db import get_pg_conn
 from app.services.file_content_validator import comprehensive_file_validation
 from ..services.auth_deps import get_current_user, require_role
 from app.services.mongo_extraction import extract_json_ai, store_extraction_result
@@ -22,6 +23,7 @@ from app.common.db.db import init_db
 import uuid
 import datetime
 import app.common.db.db as db_module
+from ..services.auth_deps import get_current_user, require_role
 
 
 DB = init_db()
@@ -41,13 +43,19 @@ MAX_FILE_SIZE_MB = 50
 MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024
 
 @router.post("/files", status_code=status.HTTP_200_OK)
-# async def upload_files(user: Dict[str, Any] = Depends(get_current_user), files: List[UploadFile] = File(...)) -> Dict[str, Any]:
+async def upload_files(user: Dict[str, Any] = Depends(get_current_user), files: List[UploadFile] = File(...)) -> Dict[str, Any]:
 
-async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
     """
     Upload one or more files, validate size, corruption, hash, and format.
     Returns status and message per file.
     """
+    user_id = user.get("id")
+    conn = get_pg_conn()
+    cur = conn.cursor()
+    cur.execute("""SELECT org_id, role FROM organization_memberships WHERE user_id = %s LIMIT 1
+                """, (user_id,))
+    membership = cur.fetchone()
+    org_id = membership[0]
     responses = []
     ext_collection = db_module.db["extraction_results"]  
     claim_version = db_module.db["claim_version"]  
@@ -83,16 +91,16 @@ async def upload_files(files: List[UploadFile] = File(...)) -> Dict[str, Any]:
             continue
         # 6. Store metadata in PostgreSQL
         # Replace these with actual values from context/session/request
-        org_id = "9ac493f7-cc6a-4d7d-8646-affb00ed58da"
-        # org_id = "57a0f4e2-8076-4910-8259-9d06338965e9"
+   
         batch_id = None
         mime_type = file.content_type or "application/octet-stream"
         logger.info(f"Processing file: {file.filename}, size: {len(content)}, mime_type: {mime_type}")
         file_size = len(content)
         upload_source = "manual"
-        # uploaded_by = "b729c531-7c90-4602-b541-e910d45b0a0d"  
-        uploaded_by = "e3a84bea-8c81-47fa-9009-ca71e94105d8"
-        # uploaded_by = "57a0f4e2-8076-4910-8259-9d06338965e9"  
+        
+        uploaded_by = user_id
+
+        
         file_id = insert_upload_file(
             org_id=org_id,
             batch_id=batch_id,
