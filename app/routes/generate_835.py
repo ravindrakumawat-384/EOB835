@@ -328,9 +328,7 @@ async def generate_835_file(request: Generate835Request):
         claim_status = claim_data.get("status")
         claim_number = claim_data.get("claimNumber")
         if claim_status == 'generated':
-            return {"message": "835 already generated for this claim.", 
-                    "s3_path": "Link not found.",
-                    "status": "already_generated"}
+            return {"status": "already_generated"}
         
         
 
@@ -345,6 +343,7 @@ async def generate_835_file(request: Generate835Request):
 
         # 5) DB inserts
         conn = get_pg_conn()
+        
         export_id, export_ref = save_export_records(
             conn,
             org_id=request.org_id,

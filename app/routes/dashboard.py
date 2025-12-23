@@ -278,7 +278,8 @@ async def dashboard_summary() -> JSONResponse:
                 "payer": row[4] or "Unknown",
                 "status": row[3],
                 # "uploaded": humanize(row[1])
-                "uploaded": covert_date_time(row[2])
+                # "uploaded": covert_date_time(row[2])
+                "uploaded": str(row[2]) 
             })
         # MongoDB recent uploads removed - using PostgreSQL data only
         resp_data = {
@@ -297,7 +298,7 @@ async def dashboard_summary() -> JSONResponse:
                     {"field": "fileName", "label": "File Name"},
                     {"field": "payer", "label": "Payer"},
                     {"field": "status", "label": "Status"},
-                    {"field": "uploaded", "label": "Uploaded"},
+                    {"field": "uploaded", "label": "Uploaded", "isDate": True},
                     {"label": "Actions", "actions": [{"type": "view", "icon": "pi pi-eye", "styleClass": "p-button-text p-button-sm"}]}
                 ],
                 "tableData": table_rows
