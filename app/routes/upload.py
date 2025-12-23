@@ -134,14 +134,66 @@ async def upload_files(user: Dict[str, Any] = Depends(get_current_user), files: 
         def split_claim_blocks(raw_text: str) -> List[str]:
             """
             Deterministically split raw OCR text into claim-level blocks.
+            Prepends the file header (first block) to all subsequent blocks to preserve context.
             """
             blocks = re.split(
                 r'(?=Patient Name:|CLAIM NO\.|Claim Number:)',
                 raw_text
             )
-
-            # Remove garbage headers
-            return [b.strip() for b in blocks if len(b.strip()) > 200]
+            
+            # Filter out empty blocks
+            valid_blocks = [b.strip() for b in blocks if len(b.strip()) > 50]
+            
+            if not valid_blocks:
+                return []
+                
+            # Assume the first block contains header info (Payer, Check #, etc.)
+            header = valid_blocks[0]
+            
+            # If the first block IS a claim (starts with split pattern), then header might be empty or implicit.
+            # But usually re.split with lookahead keeps the delimiter at start of next block.
+            # So blocks[0] is everything BEFORE the first match.
+            
+            final_blocks = []
+            
+            # First block is usually header + maybe first claim if pattern didn't match at very start
+            # Actually, with lookahead, blocks[0] is the text BEFORE the first match.
+            # If file starts with "Patient Name:", blocks[0] is empty.
+            
+            # Let's refine:
+            # If blocks[0] is small (< 500 chars) and doesn't look like a full claim, treat it as header.
+            # If it's large, it might be the first claim.
+            
+            # Strategy: Always prepend blocks[0] (header) to blocks[1:] 
+            # AND keep blocks[0] as the first item (it might be header + claim 1, or just header).
+            
+            # Wait, if blocks[0] is JUST header, we shouldn't process it as a claim on its own if it has no claim data.
+            # But if we prepend it to others, we risk duplicating it if we also process it.
+            
+            # Better approach:
+            # 1. Identify header (blocks[0]).
+            # 2. If len(blocks) > 1:
+            #    - Process blocks[0] as Claim 1 (it has header info naturally).
+            #    - For blocks[1:], prepend header + "\n" + block.
+            
+            if len(valid_blocks) > 1:
+                # Header is likely in valid_blocks[0]
+                header_text = valid_blocks[0]
+                
+                # If header is very long, it might be a claim itself. 
+                # If it's short, it's just header.
+                
+                processed_blocks = [valid_blocks[0]] # First block always has header context
+                
+                for i in range(1, len(valid_blocks)):
+                    # Prepend header to subsequent blocks
+                    combined = header_text + "\n" + ("-" * 20) + "\n" + valid_blocks[i]
+                    processed_blocks.append(combined)
+                    
+                return processed_blocks
+            else:
+                # Only one block found, return as is
+                return valid_blocks
 
         # print("Splited Raws text========>>  ", split_claim_blocks(raw_text))
 
@@ -156,7 +208,6 @@ async def upload_files(user: Dict[str, Any] = Depends(get_current_user), files: 
                 if payer_db_name and payer_db_name.lower() in raw_text.lower():
                     matched_payer_name = payer_db_name
                     break
-        print('Matched payer name in extracted text:', matched_payer_name)
     
 
         pg = get_pg_conn()
@@ -228,7 +279,17 @@ async def upload_files(user: Dict[str, Any] = Depends(get_current_user), files: 
         import asyncio
         
         claim_blocks = split_claim_blocks(raw_text)
-        tasks = [ai_extract_claims(block, dynamic_key) for block in claim_blocks]
+        
+        # Limit concurrency to avoid rate limits (max 3 parallel requests)
+        sem = asyncio.Semaphore(3)
+
+        async def extract_with_sem(block):
+            async with sem:
+                # Add a small delay to further space out requests
+                await asyncio.sleep(0.5)
+                return await ai_extract_claims(block, dynamic_key)
+
+        tasks = [extract_with_sem(block) for block in claim_blocks]
         
         # Run all extractions in parallel
         claims = await asyncio.gather(*tasks)
