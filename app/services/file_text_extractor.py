@@ -39,6 +39,7 @@ def extract_text_from_file(content: bytes, filename: str, mime_type: Optional[st
     - DOCX/TXT: Native text extraction.
     Returns extracted text or a diagnostic placeholder if not supported.
     """
+    print("Starting text extraction...")
     if not mime_type:
         mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
     # PDF
@@ -78,14 +79,14 @@ def extract_text_from_file(content: bytes, filename: str, mime_type: Optional[st
                 sources.append(f"[pdfplumber extraction failed: {e}]")
 
         # 2) PyPDF2 fallback
-        if PyPDF2:
-            try:
-                reader = PyPDF2.PdfReader(io.BytesIO(content))
-                text = "\n".join(page.extract_text() or "" for page in reader.pages)
-                if text.strip():
-                    sources.append(text)
-            except Exception as e:
-                sources.append(f"[PyPDF2 extraction failed: {e}]")
+        # if PyPDF2:
+        #     try:
+        #         reader = PyPDF2.PdfReader(io.BytesIO(content))
+        #         text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        #         if text.strip():
+        #             sources.append(text)
+        #     except Exception as e:
+        #         sources.append(f"[PyPDF2 extraction failed: {e}]")
 
         # 3) OCR with Tesseract (preferred for scanned PDFs)
         if convert_from_bytes and pytesseract and Image:

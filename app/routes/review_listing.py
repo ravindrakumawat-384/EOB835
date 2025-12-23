@@ -138,7 +138,7 @@ async def review_queue(
                     "options": reviewer_options,
                 },
             },
-            {"field": "uploaded", "label": "Uploaded"},
+            {"field": "uploaded", "label": "Uploaded", "isDate": True},
             {
                 "label": "Actions",
                 "actions": [
@@ -261,10 +261,10 @@ async def review_queue(
                         "claim_id": claim_line_id, 
                         "fileName": filename,
                         "payer": ext.get("payerName") or payer_name or "Unknown",
-                        "confidence": f"{int(conf_val)}%",
+                        "confidence": f"{int(conf_val)}",
                         "status": status,
                         "reviewer": reviewer_ids or "Unassigned",
-                        "uploaded": uploaded_at.strftime("%Y-%m-%d"),
+                        "uploaded": uploaded_at,
                     }
                 )
 

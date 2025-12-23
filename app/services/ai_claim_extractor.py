@@ -32,7 +32,7 @@ except ImportError as e:
 
 
 
-def ai_extract_claims(raw_text: str, dynamic_key: List[str]) -> Dict[str, Any]:
+async def ai_extract_claims(raw_text: str, dynamic_key: List[str]) -> Dict[str, Any]:
     """
     Use ONLY AI model to extract claims from raw text and convert to structured JSON.
     Returns extraction result with confidence scores.
@@ -43,7 +43,7 @@ def ai_extract_claims(raw_text: str, dynamic_key: List[str]) -> Dict[str, Any]:
     # Use ONLY AI extraction - provide fallback for testing
     if OPENAI_AVAILABLE and OPENAI_API_KEY:
         try:
-            result = extract_with_openai(raw_text, dynamic_key)
+            result = await extract_with_openai(raw_text, dynamic_key)
             # if result.get("claims"):
             #     return result
             # else:
@@ -52,7 +52,6 @@ def ai_extract_claims(raw_text: str, dynamic_key: List[str]) -> Dict[str, Any]:
 
 
             
-
 
 
             return result
@@ -322,13 +321,13 @@ def _build_extraction_hints(raw_text: str) -> Dict[str, Any]:
     }
 #=========================start=================================
 
-def extract_with_openai(raw_text: str, dynamic_keys: List[Dict[str, Any]]) -> Dict[str, Any]:
+async def extract_with_openai(raw_text: str, dynamic_keys: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Extract structured data from raw text using dynamic_keys driven schema.
     """
 
     try:
-        client = openai.OpenAI(api_key=OPENAI_API_KEY)
+        client = openai.AsyncOpenAI(api_key=OPENAI_API_KEY)
 
         hints = _build_extraction_hints(raw_text)
 
@@ -426,7 +425,7 @@ def extract_with_openai(raw_text: str, dynamic_keys: List[Dict[str, Any]]) -> Di
             HINTS:
             """ + json.dumps(hints, ensure_ascii=False)
 
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a strict JSON extraction engine."},
