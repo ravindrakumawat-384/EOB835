@@ -459,12 +459,29 @@ STRICT RULES:
 LABELS:
 {json.dumps(missing_labels, ensure_ascii=False)}
 
-OUTPUT FORMAT:
-{{
-  "values_by_label": {{
-    "<label>": "<value_or_null>"
-  }}
-}}
+            MANDATORY OUTPUT FORMAT:
+
+            {
+            "sections": [
+                {
+                "id": "<same as input>",
+                "sectionName": "<same as input>",
+                "dataKey": "<same as input>",
+                "sectionOrder": "<same as input>",
+                "fields": [
+                    {
+                    "id": "<same>",
+                    "field": "<same>",
+                    "label": "<same>",
+                    "type": "<same>",
+                    "fieldOrder": "<same>",
+                    "confidence": "<same>",
+                    "value": "<extracted_value_or_null>"
+                    }
+                ]
+                }
+            ]
+            }
 
 raw_text:
 {raw_text[:9000]}
