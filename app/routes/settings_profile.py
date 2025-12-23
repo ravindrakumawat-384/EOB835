@@ -2,16 +2,25 @@ import psycopg2
 from app.common.db.pg_db import get_pg_conn
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
+from app.common.config import settings
 from typing import Dict, Any, Optional
 from ..services.auth_deps import get_current_user
 from ..utils.logger import get_logger
 from datetime import datetime
 import os
+from app.services.s3_service import S3Service
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/settings/profile", tags=["settings-profile"])
 
+
+# S3 configuration (replace with your actual credentials and bucket)
+S3_BUCKET = settings.S3_BUCKET
+AWS_ACCESS_KEY_ID = settings.AWS_ACCESS_KEY_ID
+AWS_SECRET_ACCESS_KEY = settings.AWS_SECRET_ACCESS_KEY 
+AWS_REGION = settings.AWS_REGION
+s3_client = S3Service(S3_BUCKET, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION)
 
 def clean_mongo_doc(doc):
     if not doc:
@@ -152,41 +161,38 @@ async def update_user_profile(payload: Dict[str, Any], user: Dict[str, Any] = De
         logger.error(f"Failed to update user profile: {e}")
         raise HTTPException(status_code=500, detail="Failed to update user profile")
 
-
-
 # GET API to return the actual uploaded profile image file
 # @router.post("/upload-profile-pic", response_model=Dict[str, Any])
 @router.get("/profile-pic")
 async def get_profile_pic(user: Dict[str, Any] = Depends(get_current_user)):
     """
-    Get the actual uploaded profile picture file for the user.
+    Return a presigned S3 URL for the user's profile picture.
     """
     try:
-        # user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4"  # TODO: Replace with Depends(get_current_user)
         user_id = user.get("id")
-        print("User ID:", user_id)
+        logger.info(f"Fetching profile picture for user_id: {user_id}")
         with get_pg_conn() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute("SELECT profile_pic_path FROM user_profiles WHERE user_id = %s LIMIT 1", (user_id,))
                 user_prof_data = cur.fetchone()
-                if not user_prof_data or not user_prof_data.get("profile_pic_path"):
-                    logger.warning(f"Profile picture not found for user_id: {user_id}")
-                    raise HTTPException(status_code=404, detail="Profile picture not found")
-                file_path = user_prof_data["profile_pic_path"]
-        if not os.path.exists(file_path):
-            logger.warning(f"Profile picture file not found on disk: {file_path}")
-            raise HTTPException(status_code=404, detail="Profile picture file not found")
-        # Guess content type from file extension
-        ext = os.path.splitext(file_path)[1].lower()
-        if ext in [".jpg", ".jpeg"]:
-            media_type = "image/jpeg"
-        elif ext == ".png":
-            media_type = "image/png"
-        elif ext == ".gif":
-            media_type = "image/gif"
-        else:
-            media_type = "application/octet-stream"
-        return FileResponse(file_path, media_type=media_type)
+        if not user_prof_data or not user_prof_data.get("profile_pic_path"):
+            logger.warning(f"Profile picture not found for user_id: {user_id}")
+            raise HTTPException(status_code=404, detail="Profile picture not found")
+        try:
+            s3_service = S3Service(
+                settings.S3_BUCKET,
+                settings.AWS_ACCESS_KEY_ID,
+                settings.AWS_SECRET_ACCESS_KEY,
+                settings.AWS_REGION
+            )
+            presigned_url = s3_service.generate_presigned_url(user_prof_data["profile_pic_path"], expiration=300)
+            if not presigned_url:
+                logger.error(f"Failed to generate presigned URL for user_id: {user_id}")
+                raise HTTPException(status_code=500, detail="Failed to generate profile picture URL")
+            return {"profile_pic_url": presigned_url}
+        except Exception as s3_error:
+            logger.error(f"Error generating presigned URL: {str(s3_error)}")
+            raise HTTPException(status_code=500, detail="Failed to generate profile picture URL")
     except HTTPException:
         raise
     except Exception as e:
@@ -214,33 +220,43 @@ async def upload_profile_pic(file: UploadFile = File(...), user: Dict[str, Any] 
                 if not user_prof_data:
                     logger.warning(f"User not found: {user_id}")
                     raise HTTPException(status_code=404, detail="User not found")
+
         # Validate file type
         allowed_types = ["image/jpeg", "image/png", "image/gif"]
         if file.content_type not in allowed_types:
             logger.warning(f"Invalid file type: {file.content_type}")
             raise HTTPException(status_code=400, detail="Invalid file type. Only JPG, PNG, GIF allowed.")
+        
         # Validate file size (max 2MB)
-        contents = await file.read()
-        if len(contents) > 2 * 1024 * 1024:
-            logger.warning(f"File too large: {len(contents)} bytes")
+        content = await file.read()
+        if len(content) > 2 * 1024 * 1024:
+            logger.warning(f"File too large: {len(content)} bytes")
             raise HTTPException(status_code=400, detail="File too large. Max size is 2MB.")
-        # Save uploaded file to disk
-        upload_dir = "uploaded_profile_pics"
-        os.makedirs(upload_dir, exist_ok=True)
-        filename = f"{user_id}_{int(datetime.utcnow().timestamp())}_{file.filename}"
-        file_path = os.path.join(upload_dir, filename)
-        with open(file_path, "wb") as f:
-            f.write(contents)
+        
+
+        
+        # Save uploaded file to S3
+        # filename = f"{user_id}_{int(datetime.utcnow().timestamp())}_{file.filename}"
+        # s3_client.upload_fileobj(file.file, S3_BUCKET, filename)
+        # file_path = f"s3://{S3_BUCKET}/{filename}"
+        responses = []
+        # 5. Save file and metadata (to S3)
+        s3_path = s3_client.upload_file(content, file.filename)
+        if not s3_path:
+            responses.append({"filename": file.filename, "status": "error", "message": "Failed to upload to S3"})
+            # continue
+
+
         # Update user profile_pic_path in PostgreSQL
         with get_pg_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "UPDATE user_profiles SET profile_pic_path = %s, updated_at = %s WHERE user_id = %s",
-                    (file_path, datetime.utcnow(), user_id)
+                    (s3_path, datetime.utcnow(), user_id)
                 )
                 conn.commit()
-        logger.info(f"Profile picture uploaded for user_id: {user_id}, path: {file_path}")
-        return {"success": True, "profile_pic_path": file_path}
+        logger.info(f"Profile picture uploaded for user_id: {user_id}, path: {s3_path}")
+        return {"success": True, "profile_pic_path": s3_path}
     except HTTPException:
         raise
     except Exception as e:
