@@ -81,3 +81,76 @@ async def send_email_stub(
         logger.info(f"[DEV EMAIL STUB] Would send to {to_email} | subject: {subject} | payload: {payload}")
     except Exception as e:
         logger.error(f"Failed to log email stub for {to_email}: {e}")
+
+
+
+
+
+def send_invite_email(to_email: str, temp_pass, user_name: str, org_name: str) -> bool:
+    try:
+        print("Enter in SSend Invite mail function")
+        msg = EmailMessage()
+        msg["Subject"] = "Invitation to Join"
+        msg["From"] = SMTP_USER
+        msg["To"] = to_email
+
+        frontend = settings.FRONTEND_URL or ""
+        login_url = f"{frontend.rstrip('/')}" + f"/auth/login"
+
+        msg.add_alternative(
+            f"""
+            <html>
+                <body>
+                    <p>Hello {user_name},</p>
+
+                    <p>
+                        You have been invited to join <strong>{org_name}</strong> on our platform.
+                    </p>
+
+                    <p>
+                        By accepting this invitation, you’ll be able to access the organization’s resources
+                        and collaborate with the team.
+                    </p>
+
+                    <p>
+                        Please click the link below to accept the invitation and complete your setup:<br>
+                        <a href="{login_url}" style="color:#1a73e8; text-decoration:underline;">
+                            Accept Invitation
+                        </a>
+                    </p>
+                    
+                    <p>
+                        Please find your login details below:
+                    </p>
+                    
+                    <p>
+                        Email: <strong>{to_email}</strong><br>
+                        Your temporary password is: <strong>{temp_pass}</strong><br>
+                        (Please change your password after logging in for the first time.)
+                    </p>
+
+
+                    <p>
+                        If you face any issues, try pasting the link into your browser.
+                    </p>
+
+                    <p>Regards,<br>
+                    Team EOB
+                    </p>
+                </body>
+            </html>
+            """,
+            subtype="html"
+        )
+
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
+            smtp.ehlo()
+            smtp.starttls()
+            smtp.ehlo()
+            smtp.login(SMTP_USER, SMTP_PASS)
+            smtp.send_message(msg)
+        logger.info(f"Password reset email sent to {to_email}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send reset email to {to_email}: {e}")
+        return False

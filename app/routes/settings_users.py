@@ -2,12 +2,13 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
+from datetime import datetime
 from ..services.auth_deps import get_current_user, require_role
 from ..utils.logger import get_logger
 from app.common.db.pg_db import get_pg_conn
 import psycopg2.extras
-# from ..services.email_service import send_email_stub, send_invite_email
-# from ..utils.auth_utils import hash_password
+from ..services.email_service import send_email_stub, send_invite_email
+from ..utils.auth_utils import hash_password
 logger = get_logger(__name__)
 router = APIRouter(prefix="/settings/users", tags=["settings-users"])
 
@@ -172,23 +173,34 @@ async def post_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_
                 if not org:
                     raise HTTPException(status_code=404, detail="Organization not found")
                 org_id = org["org_id"]
+
+                # Get organization
+                cur.execute("SELECT name, timezone FROM organizations WHERE id = %s LIMIT 1", (org_id,))
+                org = cur.fetchone()
+                if not org:
+                    logger.warning("Organization not found for org_id: %s", org_id)
+                    raise HTTPException(status_code=404, detail="Organization not found")
+                org_name = org["name"]
+
                 # # Check if user exists
-                # cur.execute("SELECT id FROM users WHERE email = %s LIMIT 1", (payload["email"],))
-                # usr = cur.fetchone()
-                # if not usr:
-                #     # Create new user
-                #     import uuid
-                #     new_user_id = str(uuid.uuid4())
-                #     password = hash_password("changeme123")
-                #     cur.execute(
-                #         "INSERT INTO users (id, email, full_name, password_hash, is_active, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, NOW(), NOW())",
-                #         (new_user_id, payload["email"], payload.get("name", ""), password, True)
-                #     )
-                #     add_user_id = new_user_id
-                #     # Send invite email
-                #     send_invite_email(payload["email"], payload.get("name", ""), org_id)
-                # else:
-                #     add_user_id = usr["id"]
+                cur.execute("SELECT id FROM users WHERE email = %s LIMIT 1", (payload["email"],))
+                usr = cur.fetchone()
+                if not usr:
+                    # Create new user
+                    import uuid
+                    new_user_id = str(uuid.uuid4())
+                    password = hash_password("changeme123")
+                    cur.execute(
+                        "INSERT INTO users (id, email, full_name, password_hash, is_active, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, NOW(), NOW())",
+                        (new_user_id, payload["email"], payload.get("name", ""), password, True)
+                    )
+                    add_user_id = new_user_id
+                    # Send invite email
+                    temp_pass = "changeme123"
+                    send_invite_email(payload["email"], temp_pass, payload.get("name", ""), org_name)
+                else:
+                    # add_user_id = usr["id"]
+                    raise HTTPException(status_code=500, detail="User already exists. Please use a different email.")
                 # Insert new membership
                 cur.execute(
                     "INSERT INTO organization_memberships (org_id, user_id, role, created_at) VALUES (%s, %s, %s, %s) RETURNING id",
@@ -200,7 +212,7 @@ async def post_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_
         return {"message": "User added successfully", "member": member_id}
     except Exception as e:
         logger.error(f"Failed to create team member: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create team member")
+        raise HTTPException(status_code=500, detail="Failed to create team member. Ooooooooo liluu mt ro ree..")
 
 
 # -------------------- UPDATE USER --------------------
