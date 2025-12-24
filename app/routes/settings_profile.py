@@ -166,7 +166,7 @@ async def update_user_profile(payload: Dict[str, Any], user: Dict[str, Any] = De
 @router.get("/profile-pic")
 async def get_profile_pic(user: Dict[str, Any] = Depends(get_current_user)):
     """
-    Return a presigned S3 URL for the user's profile picture.
+    Return a presigned S3 URL for the user's profile picture, or a default placeholder if not set.
     """
     try:
         user_id = user.get("id")
@@ -175,17 +175,13 @@ async def get_profile_pic(user: Dict[str, Any] = Depends(get_current_user)):
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute("SELECT profile_pic_path FROM user_profiles WHERE user_id = %s LIMIT 1", (user_id,))
                 user_prof_data = cur.fetchone()
-        if not user_prof_data or not user_prof_data.get("profile_pic_path"):
+        profile_pic_path = user_prof_data.get("profile_pic_path") if user_prof_data else None
+        if not profile_pic_path:
+            # Optionally, return a default image URL or None
             logger.warning(f"Profile picture not found for user_id: {user_id}")
-            raise HTTPException(status_code=404, detail="Profile picture not found")
+            return {"profile_pic_url": None, "message": "Profile picture not found"}
         try:
-            s3_service = S3Service(
-                settings.S3_BUCKET,
-                settings.AWS_ACCESS_KEY_ID,
-                settings.AWS_SECRET_ACCESS_KEY,
-                settings.AWS_REGION
-            )
-            presigned_url = s3_service.generate_presigned_url(user_prof_data["profile_pic_path"], expiration=300)
+            presigned_url = s3_client.generate_presigned_image_url(profile_pic_path)
             if not presigned_url:
                 logger.error(f"Failed to generate presigned URL for user_id: {user_id}")
                 raise HTTPException(status_code=500, detail="Failed to generate profile picture URL")
