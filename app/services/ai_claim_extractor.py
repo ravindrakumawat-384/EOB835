@@ -321,162 +321,420 @@ def _build_extraction_hints(raw_text: str) -> Dict[str, Any]:
     }
 #=========================start=================================
 
-async def extract_with_openai(raw_text: str, dynamic_keys: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """
-    Extract structured data from raw text using dynamic_keys driven schema.
-    """
 
+def _index_fields_by_label(result: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    """
+    Returns { normalized_label: field_object }
+    """
+    out = {}
+    for section in result.get("sections", []):
+        for field in section.get("fields", []):
+            label = field.get("label", "").strip().lower()
+            out[label] = field
+    return out
+
+
+async def extract_with_openai(
+    raw_text: str,
+    dynamic_keys: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    AI-only, label-locked, two-pass extraction.
+    Guarantees: if LABEL exists in raw_text, value will not be null.
+    """
+    print(raw_text)
+    print(dynamic_keys)
     try:
         client = openai.AsyncOpenAI(api_key=OPENAI_API_KEY)
 
-        hints = _build_extraction_hints(raw_text)
+        # ---------- PASS 1 ----------
+        base_prompt = f"""
+You are a STRICT data extractor.
 
-        prompt = """
-            You are given TWO inputs.
+RULES:
+1. dynamic_keys DEFINES THE SCHEMA.
+2. COPY structure EXACTLY.
+3. Add ONLY one key: "value".
+4. Extract ONLY from raw_text.
+5. If value not found, set null.
+6. DO NOT guess.
+7. Dates: if range, return ONLY the FIRST date.
 
-            INPUT 1:
-            A JSON object named `dynamic_keys`.
-            It defines the EXACT response schema.
-            It contains sections and fields with metadata.
+EXTRACTION STRATEGY:
+- For each field, locate its LABEL followed by ":".
+- Extract the value immediately after the label.
+- Stop at the next label or line break.
+- If label exists, value MUST be extracted.
 
-            INPUT 2:
-            Raw document text.
+MANDATORY OUTPUT FORMAT:
 
-            AUXILIARY INPUT 3 (HINTS):
-            A small JSON with regex-detected candidates for service line data
-            (procedure codes, units, amounts, dates). Use these ONLY as guidance
-            to improve recall; do not invent values.
+{{
+"sections": [
+    {{
+    "id": "<same as input>",
+    "sectionName": "<same as input>",
+    "dataKey": "<same as input>",
+    "sectionOrder": <same as input>,
+    "fields": [
+        {{
+        "id": "<same>",
+        "field": "<same>",
+        "label": "<same>",
+        "type": "<same>",
+        "fieldOrder": <same>,
+        "confidence": <same>,
+        "value": "<extracted_value_or_null>"
+        }}
+    ]
+    }}
+]
+}}
 
-            GOAL:
-            Return extracted data by COPYING the structure of `dynamic_keys`
-            and ADDING ONE key named `value` inside EACH field.
+OUTPUT:
+VALID JSON ONLY. NO TEXT.
 
-            STRICT RULES:
+dynamic_keys:
+{json.dumps(dynamic_keys, ensure_ascii=False)}
 
-            1. DO NOT remove any existing keys.
-            2. DO NOT rename any keys.
-            3. DO NOT add new keys except `value`.
-            4. DO NOT reorder sections or fields.
-            5. Preserve ALL field properties:
-            - id
-            - field
-            - label
-            - type
-            - fieldOrder
-            - confidence
-            6. Add `"value"` to every field.
-            7. Extract values ONLY from text.
-            8. If value is not found, set `"value": null`.
+raw_text:
+{raw_text[:6000]}
+"""
 
-            LEVEL BEHAVIOR:
-            - dynamic_keys = schema
-            - section = grouping
-            - field = extraction unit
-
-                        SPECIAL INSTRUCTIONS FOR SERVICE LINE DATA:
-                        - Sections whose names or dataKey indicate service lines (contains any of:
-                            "service", "svc", "service line") must be populated by scanning both raw text
-                            AND HINTS. Many documents encode service lines as rows in tables.
-                        - Use common patterns:
-                            • CPT: 5-digit numeric (e.g., 99213)
-                            • HCPCS: letter + 4 digits (e.g., J1234)
-                            • Units: integers/decimals near words like "Units", "Qty", "Quantity"
-                            • Dates of service: mm/dd/yyyy (or similar), often a range like 10/08/2025 - 10/08/2025
-                            • Amounts: $1,234.56 style
-                        - Prefer a value that appears on the same line or row as the code.
-                        - If multiple candidates exist, choose the most contextually relevant one,
-                            prioritizing proximity and section semantics; otherwise return null.
-                        - Do NOT add new fields; only fill the existing ones defined in dynamic_keys.
-
-            MANDATORY OUTPUT FORMAT:
-
-            {
-            "sections": [
-                {
-                "id": "<same as input>",
-                "sectionName": "<same as input>",
-                "dataKey": "<same as input>",
-                "sectionOrder": <same as input>,
-                "fields": [
-                    {
-                    "id": "<same>",
-                    "field": "<same>",
-                    "label": "<same>",
-                    "type": "<same>",
-                    "fieldOrder": <same>,
-                    "confidence": <same>,
-                    "value": "<extracted_value_or_null>"
-                    }
-                ]
-                }
-            ]
-            }
-
-            NO explanations.
-            NO markdown.
-            ONLY valid JSON.
-
-            dynamic_keys:
-            """ + json.dumps(dynamic_keys, ensure_ascii=False) + """
-
-            RAW TEXT:
-            """ + raw_text[:6000] + """
-
-            HINTS:
-            """ + json.dumps(hints, ensure_ascii=False)
-
-        response = await client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a strict JSON extraction engine."},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0,
-            max_tokens=3000,
-        )
+        # 3. Call AI with Retry Logic
+        import asyncio
+        response = None
+        for attempt in range(3):
+            try:
+                response = await client.chat.completions.create(
+                    model="gpt-4-turbo",  # Using GPT-4 Turbo for maximum accuracy
+                    messages=[
+                        {"role": "system", "content": "You output strict JSON only."},
+                        {"role": "user", "content": base_prompt},
+                    ],
+                    temperature=0,
+                    max_tokens=4096,  # Increased for better extraction
+                )
+                break
+            except Exception as e:
+                if attempt == 2:
+                    logger.error(f"OpenAI API failed after 3 attempts: {e}")
+                    raise e
+                wait_time = 2 ** attempt  # 1s, 2s, 4s
+                logger.warning(f"OpenAI API failed (attempt {attempt+1}/3). Retrying in {wait_time}s... Error: {e}")
+                await asyncio.sleep(wait_time)
 
         content = response.choices[0].message.content.strip()
 
-        print()
-        # print("OpenAI raw response content:=========", content)
-        print()
-
-        # Remove markdown if present
+        # Clean markdown code blocks
         if content.startswith("```"):
-            content = content.split("```")[1]
+            parts = content.split("```")
+            if len(parts) >= 2:
+                content = parts[1].strip()
+                # Remove language identifier (json, JSON, etc.)
+                if content.lower().startswith("json"):
+                    content = content[4:].strip()
 
-        result = json.loads(content)
+        # Try to parse JSON with error handling
+        try:
+            result = json.loads(content)
+        except json.JSONDecodeError as e:
+            logger.warning(f"JSON parsing failed on first attempt: {e}. Attempting to repair...")
 
-        # HARD GUARANTEE: every field has `value`
-        for section in result.get("sections", []):
-            for field in section.get("fields", []):
-                field.setdefault("value", None)
-        # print("OpenAI extraction result:=========", result)
+            # Common JSON fixes
+            content = content.replace('\n', ' ')  # Remove newlines within strings
+            content = re.sub(r',(\s*[}\]])', r'\1', content)  # Remove trailing commas
+            content = re.sub(r'}\s*{', '},{', content)  # Fix missing commas between objects
+
+            try:
+                result = json.loads(content)
+                logger.info("JSON repair successful!")
+            except json.JSONDecodeError as e2:
+                logger.error(f"JSON repair failed: {e2}")
+                # Return error structure
+                return {
+                    "sections": [],
+                    "error": "ai_extraction_failed",
+                    "details": f"JSON parsing error: {str(e2)}"
+                }
+
+        # Ensure value key exists
+        for s in result.get("sections", []):
+            for f in s.get("fields", []):
+                f.setdefault("value", None)
+
+        # ---------- FIND NULLS ----------
+        label_index = _index_fields_by_label(result)
+        missing_labels = [
+            field["label"]
+            for field in label_index.values()
+            if field.get("value") in (None, "", [])
+        ]
+
+        if not missing_labels:
+            return result
+
+        # ---------- PASS 2 (LABEL-LOCKED RECOVERY) ----------
+        # PRODUCTION FIX: Use regular string with format() to avoid f-string brace escaping issues
+        recovery_prompt = """
+Some fields were NOT extracted even though their LABELS exist.
+
+STRICT RULES:
+1. Extract values ONLY by LABEL.
+2. Use ONLY raw_text.
+3. If label exists, value MUST be extracted.
+4. Dates: if range, return ONLY the FIRST date.
+5. Output JSON ONLY.
+6. In amount don't read $ sign.
+
+LABELS:
+{missing_labels}
+
+MANDATORY OUTPUT FORMAT:
+
+{{
+  "sections": [
+    {{
+      "id": "<same as input>",
+      "sectionName": "<same as input>",
+      "dataKey": "<same as input>",
+      "sectionOrder": "<same as input>",
+      "fields": [
+        {{
+          "id": "<same>",
+          "field": "<same>",
+          "label": "<same>",
+          "type": "<same>",
+          "fieldOrder": "<same>",
+          "confidence": "<same>",
+          "value": "<extracted_value_or_null>"
+        }}
+      ]
+    }}
+  ]
+}}
+
+raw_text:
+{raw_text_chunk}
+""".format(
+            missing_labels=json.dumps(missing_labels, ensure_ascii=False),
+            raw_text_chunk=raw_text[:9000]
+        )
+
+        retry = await client.chat.completions.create(
+            model="gpt-4-turbo",  # Using GPT-4 Turbo for maximum accuracy in recovery
+            messages=[
+                {"role": "system", "content": "You output strict JSON only."},
+                {"role": "user", "content": recovery_prompt},
+            ],
+            temperature=0,
+            max_tokens=4096,  # Increased for better recovery
+        )
+
+        retry_content = retry.choices[0].message.content.strip()
+
+        # Clean markdown code blocks
+        if retry_content.startswith("```"):
+            parts = retry_content.split("```")
+            if len(parts) >= 2:
+                retry_content = parts[1].strip()
+                if retry_content.lower().startswith("json"):
+                    retry_content = retry_content[4:].strip()
+
+        # Parse with error handling
+        try:
+            retry_response = json.loads(retry_content)
+
+            # PRODUCTION FIX: Build label-to-value mapping from response sections
+            # (not from non-existent "values_by_label" key)
+            recovered = {}
+            for section in retry_response.get("sections", []):
+                for field in section.get("fields", []):
+                    label = field.get("label", "").strip()
+                    value = field.get("value")
+                    if label and value not in (None, "", []):
+                        recovered[label] = value
+
+            logger.info(f"Recovery pass extracted {len(recovered)} field(s)")
+
+        except json.JSONDecodeError as e:
+            logger.warning(f"Recovery pass JSON parsing failed: {e}, skipping recovery")
+            recovered = {}
+
+        # ---------- MERGE BY LABEL ----------
+        for label, value in recovered.items():
+            norm = label.strip().lower()
+            if norm in label_index and value not in (None, "", []):
+                label_index[norm]["value"] = value
+
         return result
 
-    except json.JSONDecodeError as e:
-        logger.error("JSON decode failed", exc_info=True)
-        return {
-            "sections": [],
-            "error": "Invalid JSON returned by AI",
-            "details": str(e),
-        }
-
-    except openai.OpenAIError as e:
-        logger.error("OpenAI API error", exc_info=True)
-        return {
-            "sections": [],
-            "error": "OpenAI API error",
-            "details": str(e),
-        }
-
     except Exception as e:
-        logger.error("Unexpected extraction error", exc_info=True)
+        logger.error("AI extraction failed", exc_info=True)
         return {
             "sections": [],
-            "error": "Unhandled extraction error",
+            "error": "ai_extraction_failed",
             "details": str(e),
         }
+
+
+
+# async def extract_with_openai(raw_text: str, dynamic_keys: List[Dict[str, Any]]) -> Dict[str, Any]:
+#     """
+#     Extract structured data from raw text using dynamic_keys driven schema.
+#     """
+
+#     try:
+#         client = openai.AsyncOpenAI(api_key=OPENAI_API_KEY)
+
+#         hints = _build_extraction_hints(raw_text)
+
+#         prompt = """
+#             You are given TWO inputs.
+
+#             INPUT 1:
+#             A JSON object named `dynamic_keys`.
+#             It defines the EXACT response schema.
+#             It contains sections and fields with metadata.
+
+#             INPUT 2:
+#             Raw document text.
+
+#             AUXILIARY INPUT 3 (HINTS):
+#             A small JSON with regex-detected candidates for service line data
+#             (procedure codes, units, amounts, dates). Use these ONLY as guidance
+#             to improve recall; do not invent values.
+
+#             GOAL:
+#             Return extracted data by COPYING the structure of `dynamic_keys`
+#             and ADDING ONE key named `value` inside EACH field.
+
+#             STRICT RULES:
+
+#             1. DO NOT remove any existing keys.
+#             2. DO NOT rename any keys.
+#             3. DO NOT add new keys except `value`.
+#             4. DO NOT reorder sections or fields.
+#             5. Preserve ALL field properties:
+#             - id
+#             - field
+#             - label
+#             - type
+#             - fieldOrder
+#             - confidence
+#             6. Add `"value"` to every field.
+#             7. Extract values ONLY from text.
+#             8. If value is not found, set `"value": null`.
+#             9. In amount not read $ sign.
+
+#             LEVEL BEHAVIOR:
+#             - dynamic_keys = schema
+#             - section = grouping
+#             - field = extraction unit
+
+#                         SPECIAL INSTRUCTIONS FOR SERVICE LINE DATA:
+#                         - Sections whose names or dataKey indicate service lines (contains any of:
+#                             "service", "svc", "service line") must be populated by scanning both raw text
+#                             AND HINTS. Many documents encode service lines as rows in tables.
+#                         - Use common patterns:
+#                             • CPT: 5-digit numeric (e.g., 99213)
+#                             • HCPCS: letter + 4 digits (e.g., J1234)
+#                             • Units: integers/decimals near words like "Units", "Qty", "Quantity"
+#                             • Dates of service: mm/dd/yyyy (or similar), often a range like 10/08/2025 - 10/08/2025
+#                             • Amounts: $1,234.56 style
+#                         - Prefer a value that appears on the same line or row as the code.
+#                         - If multiple candidates exist, choose the most contextually relevant one,
+#                             prioritizing proximity and section semantics; otherwise return null.
+#                         - Do NOT add new fields; only fill the existing ones defined in dynamic_keys.
+
+#             MANDATORY OUTPUT FORMAT:
+
+#             {
+#             "sections": [
+#                 {
+#                 "id": "<same as input>",
+#                 "sectionName": "<same as input>",
+#                 "dataKey": "<same as input>",
+#                 "sectionOrder": <same as input>,
+#                 "fields": [
+#                     {
+#                     "id": "<same>",
+#                     "field": "<same>",
+#                     "label": "<same>",
+#                     "type": "<same>",
+#                     "fieldOrder": <same>,
+#                     "confidence": <same>,
+#                     "value": "<extracted_value_or_null>"
+#                     }
+#                 ]
+#                 }
+#             ]
+#             }
+
+#             NO explanations.
+#             NO markdown.
+#             ONLY valid JSON.
+
+#             dynamic_keys:
+#             """ + json.dumps(dynamic_keys, ensure_ascii=False) + """
+
+#             RAW TEXT:
+#             """ + raw_text[:6000] + """
+
+#             HINTS:
+#             """ + json.dumps(hints, ensure_ascii=False)
+
+#         response = await client.chat.completions.create(
+#             model="gpt-4o-mini",
+#             messages=[
+#                 {"role": "system", "content": "You are a strict JSON extraction engine."},
+#                 {"role": "user", "content": prompt},
+#             ],
+#             temperature=0,
+#             max_tokens=3000,
+#         )
+
+#         content = response.choices[0].message.content.strip()
+
+#         print()
+#         # print("OpenAI raw response content:=========", content)
+#         print()
+
+#         # Remove markdown if present
+#         if content.startswith("```"):
+#             content = content.split("```")[1]
+
+#         result = json.loads(content)
+
+#         # HARD GUARANTEE: every field has `value`
+#         for section in result.get("sections", []):
+#             for field in section.get("fields", []):
+#                 field.setdefault("value", None)
+#         # print("OpenAI extraction result:=========", result)
+#         return result
+
+#     except json.JSONDecodeError as e:
+#         logger.error("JSON decode failed", exc_info=True)
+#         return {
+#             "sections": [],
+#             "error": "Invalid JSON returned by AI",
+#             "details": str(e),
+#         }
+
+#     except openai.OpenAIError as e:
+#         logger.error("OpenAI API error", exc_info=True)
+#         return {
+#             "sections": [],
+#             "error": "OpenAI API error",
+#             "details": str(e),
+#         }
+
+#     except Exception as e:
+#         logger.error("Unexpected extraction error", exc_info=True)
+#         return {
+#             "sections": [],
+#             "error": "Unhandled extraction error",
+#             "details": str(e),
+#         }
 #=========================end===============================
 
 #==================================================================

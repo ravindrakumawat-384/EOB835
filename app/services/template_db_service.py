@@ -366,7 +366,7 @@ def save_template_data(
                 "mime_type": mime_type,
                 "processing_method": "ai_dynamic_extraction"
             },
-            "status": "completed",
+            "status": "approved",
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow()
         }
@@ -438,7 +438,7 @@ def process_existing_templates_for_payer_data(org_id: str = "9ac493f7-cc6a-4d7d-
     try:
         # Get all template sessions with extracted data
         sessions = sessions_collection.find({
-            "status": "completed",
+            "status": "approved",
             "extracted_data": {"$exists": True, "$ne": None}
         })
         

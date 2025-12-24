@@ -67,7 +67,7 @@ def insert_upload_file(
     conn.close()
     return file_id
 
-def update_file_status(file_id: str, status: str, error_message: Optional[str] = None) -> bool:
+def update_file_status(file_id: str, status: str, payer_id: str, error_message: Optional[str] = None) -> bool:
     """
     Update the processing status and error message of an uploaded file.
     
@@ -102,17 +102,17 @@ def update_file_status(file_id: str, status: str, error_message: Optional[str] =
                 SET processing_status = %s, processing_error_message = %s, updated_at = %s
                 WHERE id = %s
                 """,
-                (status, error_message, datetime.utcnow(), file_id)
+                (status, error_message, datetime.utcnow(), payer_id, file_id)
             )
         else:
             logger.info(f"📝 Clearing error message")
             cur.execute(
                 """
                 UPDATE upload_files 
-                SET processing_status = %s, updated_at = %s
+                SET processing_status = %s, updated_at = %s, detected_payer_id = %s
                 WHERE id = %s
                 """,
-                (status, datetime.utcnow(), file_id)
+                (status, datetime.utcnow(), payer_id, file_id)
             )
         
         conn.commit()

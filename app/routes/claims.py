@@ -1,17 +1,17 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import Dict, Any, List
 import psycopg2
-from ..services.pg_upload_files import get_pg_conn
 import json
 from app.common.db.db import init_db
 from ..utils.logger import get_logger
-from ..services.pg_upload_files import get_pg_conn
+# from ..services.pg_upload_files import get_pg_conn
+from app.common.db.pg_db import get_pg_conn
 from app.services.s3_service import S3Service
 from app.common.config import settings
 from datetime import datetime
 from pymongo import ReturnDocument
-from pymongo import ReturnDocument
 from typing import Dict, Any
+from ..services.auth_deps import get_current_user, require_role
 
 DB = init_db()
 logger = get_logger(__name__) 
@@ -19,14 +19,20 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/claims", tags=["claims"])
 
 @router.get("/claim_details/")
-async def get_claims_detail(claim_id: str) -> Dict[str, Any]:
+async def get_claims_detail(claim_id: str, user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     """
     Get the claim details with the given claim ID and database uses for this mongodb and PostgreSQL.
     upload file table to get the S3 storage path.
     mongoDB to get the claim data
     """
     try:
-
+        user_id = user.get("id")
+        conn = get_pg_conn()
+        cur = conn.cursor()
+        cur.execute("""SELECT org_id, role FROM organization_memberships WHERE user_id = %s LIMIT 1
+                    """, (user_id,))
+        membership = cur.fetchone()
+        org_id = membership[0]
         extraction_claims = DB["claim_version"]
         extraction_results = DB["extraction_results"]
         query = {
@@ -135,11 +141,11 @@ def apply_user_updates(claim: Dict[str, Any], updates: Dict[str, Any]) -> Dict[s
 
 
 @router.post("/save_claims_data")
-async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: str, check: str):
+async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: str, check: str, user: Dict[str, Any] = Depends(get_current_user)):
     try:
         version_collection = DB["claim_version"]
         extraction_collection = DB["extraction_results"]
-        updated_by = "9f44298b-5e30-4a7c-a8cb-1ae003cd9134"
+        updated_by = user.get("id")
         query = {
             "extraction_id": claim_id
         }
@@ -162,7 +168,7 @@ async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: s
             minor += 1
             next_version = f"{major}.{minor}"
 
-        if check == "exception" and result.get("status") != "completed":
+        if check == "exception" and result.get("status") != "approved":
             # Update extraction status to 'exception' in extraction_results collection
             await extraction_collection.update_one(
                 {"_id": claim_id},
@@ -173,10 +179,10 @@ async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: s
                 {"extraction_id": claim_id},
                 {"$set": {"status": "exception"}}
             )
-            return {"message": "Claims are marked as exception successfully.", "status": 200}  
+            return {"message": "Claim marked as exception successfully.", "status": 200}  
          
         # Handle draft case
-        elif check == "draft" and result.get("status") != "completed" and result.get("status") != "exception":
+        elif check == "draft" and result.get("status") != "approved" and result.get("status") != "exception":
             # Insert new version record
             await version_collection.insert_one({
                 "file_id": file_id,
@@ -205,13 +211,13 @@ async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: s
                 return_document=ReturnDocument.AFTER
 )
 
-            return {"message": "Claims are update successfull.", "status": 200}
+            return {"message": "Claim updated successfully.", "status": 200}
         
-        elif check == "confirmed" and result.get("status") != "completed" and result.get("status") != "exception":
+        elif check == "confirmed" and result.get("status") != "approved" and result.get("status") != "exception":
             # Update extraction status in extraction_results collection
             await extraction_collection.update_one(
                 {"_id": claim_id},
-                {"$set": {"status": "completed"}}
+                {"$set": {"status": "approved"}}
             )
           
             await version_collection.insert_one({
@@ -221,12 +227,12 @@ async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: s
             "claim": claim_json,
             "created_at": datetime.utcnow(),
             "updated_by": updated_by,
-            "status": "completed"
+            "status": "approved"
             })
 
             await version_collection.find_one_and_update(
                 query,
-                {"$set": {"status": "completed"}},
+                {"$set": {"status": "approved"}},
                 sort=[("created_at", 1)],
                 return_document=True
             )
@@ -248,7 +254,7 @@ async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: s
                 sort=[("created_at", 1)],   # first record (earliest)
                 return_document=ReturnDocument.AFTER
                 )
-            return {"message": "Claims are completed successfull.", "status": 200}
+            return {"message": "Claim approved successfully.", "status": 200}
         
         
     except Exception as e:

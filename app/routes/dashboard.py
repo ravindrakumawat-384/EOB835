@@ -93,7 +93,7 @@ async def dashboard_summary(user: Dict[str, Any] = Depends(get_current_user)) ->
                 # Count documents with status in ('pending_review', 'completed', 'Ai-Process')
                 count_processed = await extraction_col.count_documents({
                     "fileId": {"$in": org_file_ids},
-                    "status": {"$in": ['pending_review', 'completed', 'ai-process']}
+                    "status": {"$in": ['pending_review', 'approved', 'ai-process']}
                 })
             else:
                 count_processed = 0
@@ -284,15 +284,16 @@ async def dashboard_summary(user: Dict[str, Any] = Depends(get_current_user)) ->
             table_rows.append({
                 "fileId": str(row[0]),
                 "fileName": row[1],
-                "payer": row[4] or "Unknown",
+                "payer": row[4] or "-",
                 "status": row[3],
                 # "uploaded": humanize(row[1])
                 # "uploaded": covert_date_time(row[2])
-                "uploaded": str(row[2]) 
+                "uploaded": str(row[2]),
+                 "is_processing": row[3] == "ai_processing" if True else False, 
             })
         # MongoDB recent uploads removed - using PostgreSQL data only
         resp_data = {
-            "success": "Data retrieved successfully",
+            "success": "Data retrieved successfully.",
             "widgets": {
                 "uploaded": uploaded + pg_uploaded,
                 "processed": count_processed,
