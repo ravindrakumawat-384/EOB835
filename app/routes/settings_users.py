@@ -192,7 +192,7 @@ async def post_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_
                     password = hash_password("changeme123")
                     cur.execute(
                         "INSERT INTO users (id, email, full_name, password_hash, is_active, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, NOW(), NOW())",
-                        (new_user_id, payload["email"], payload.get("name", ""), password, True)
+                        (new_user_id, payload["email"], payload.get("name", ""), password, False)
                     )
                     add_user_id = new_user_id
                     # Send invite email

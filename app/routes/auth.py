@@ -141,14 +141,19 @@ async def login(payload: LoginRequest) -> Any:
     print("user-----> ", user)
     if not user or not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials. Please check username and password")
-    if not user.get("is_active", True):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User inactive")
+    # if not user.get("is_active", True):
+    #     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User inactive")
     access = create_access_token(user["id"])
     refresh = create_refresh_token(user["id"])
     dec = decode_token(refresh)
     now = datetime.utcnow()
     with get_pg_conn() as conn:
         with conn.cursor() as cur:
+            # Update last_login_at
+            cur.execute(
+                "UPDATE users SET is_active = TRUE, last_login_at = %s WHERE id = %s",
+                (now, user["id"])
+            )
             cur.execute(
                 "INSERT INTO refresh_tokens (jti, user_id, created_at, expires_at) VALUES (%s,%s,%s,%s)",
                 (dec.get("jti"), user["id"], now, datetime.fromtimestamp(dec.get("exp")))
@@ -156,6 +161,7 @@ async def login(payload: LoginRequest) -> Any:
             # Get org details
             cur.execute("SELECT org_id, role FROM organization_memberships WHERE user_id = %s LIMIT 1", (user["id"],))
             org_details = cur.fetchone()
+            conn.commit()
     expires_in = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 30
     if org_details:
         org_id = org_details[0]

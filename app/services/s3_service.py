@@ -45,7 +45,32 @@ class S3Service:
         except (BotoCoreError, ClientError) as e:
             logger.error(f"Failed to generate presigned URL for {s3_key}: {e}")
             return None
-    
+
+    def generate_presigned_image_url(self, s3_path: str) -> Optional[str]:
+            """Generate a presigned URL for an image file in S3, with content type detection."""
+            from mimetypes import guess_type
+            try:
+                parsed = urlparse(s3_path)
+                bucket_name = parsed.netloc
+                file_name = parsed.path.lstrip("/")
+                mime_type, _ = guess_type(file_name)
+                if not mime_type:
+                    mime_type = "application/octet-stream"
+                response = self.s3.generate_presigned_url(
+                    'get_object',
+                    Params={
+                        'Bucket': bucket_name,
+                        'Key': file_name,
+                        "ResponseContentType": mime_type
+                    },
+                    
+                )
+                logger.info(f"Generated presigned image URL for {s3_path}, {response}")
+                return response
+            except (BotoCoreError, ClientError) as e:
+                logger.error(f"Failed to generate presigned image URL for {s3_path}: {e}")
+                return None
+
     def extract_s3_key_from_path(self, s3_path: str) -> str:
         """Extract S3 key from s3://bucket/key format"""
         if s3_path.startswith(f"s3://{self.bucket_name}/"):
