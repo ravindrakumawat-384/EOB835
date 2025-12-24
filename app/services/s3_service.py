@@ -25,6 +25,24 @@ class S3Service:
             logger.error(f"Failed to upload {file_name} to S3: {e}")
             return None
     
+    def download_file(self, s3_path: str) -> bytes:
+        """Download file content from S3"""
+        try:
+            # Extract bucket and key from s3://bucket/key format
+            parsed = urlparse(s3_path)
+            bucket_name = parsed.netloc
+            file_key = parsed.path.lstrip("/")
+            
+            logger.info(f"Downloading from bucket: {bucket_name}, key: {file_key}")
+            response = self.s3.get_object(Bucket=bucket_name, Key=file_key)
+            file_content = response['Body'].read()
+            logger.info(f"Successfully downloaded {len(file_content)} bytes from {s3_path}")
+            return file_content
+        except (BotoCoreError, ClientError) as e:
+            logger.error(f"Failed to download file from {s3_path}: {e}")
+            raise
+
+    
     def generate_presigned_url(self, s3_key: str, expiration: int = 3600) -> Optional[str]:
         """Generate a presigned URL for downloading a file from S3"""
         try:
@@ -51,3 +69,4 @@ class S3Service:
         if s3_path.startswith(f"s3://{self.bucket_name}/"):
             return s3_path[len(f"s3://{self.bucket_name}/"):]
         return s3_path
+

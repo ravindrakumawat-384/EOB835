@@ -255,12 +255,29 @@ def store_claims_in_postgres(file_id: str, claim_data: Dict[str, Any], org_id: s
 
     try:
         logger.info(f"📋 Storing claim in PostgreSQL...")
-        
+
         # Ensure we have a valid payer_id
         if not payer_id:
             logger.warning(f"Missing payer_id for file {file_id}. Creating fallback payer.")
             safe_payer_name = payer_name or claim_data.get("payer_name") or "Unknown Payer"
             payer_id = get_or_create_payer(safe_payer_name, org_id)
+
+        # Handle missing claim_number
+        claim_number = claim_data.get("claim_number")
+        if not claim_number:
+            claim_number = f"MISSING-{uuid.uuid4().hex[:8]}"
+            logger.warning(f"Claim number missing for file {file_id}. Generated fallback: {claim_number}")
+
+        # Check for duplicate claim_number
+        cur.execute("""
+            SELECT id FROM claims
+            WHERE claim_number = %s AND file_id = %s
+        """, (claim_number, file_id))
+        existing_claim = cur.fetchone()
+
+        if existing_claim:
+            logger.warning(f"⚠️ Duplicate claim detected! Claim number {claim_number} already exists for file {file_id}. Skipping.")
+            return []
 
         # Create payment record
         payment_id = str(uuid.uuid4())
@@ -290,12 +307,6 @@ def store_claims_in_postgres(file_id: str, claim_data: Dict[str, Any], org_id: s
         units_val = _parse_int(claim_data.get("units"))
 
         claim_id = str(uuid.uuid4())
-        
-        # Handle missing claim_number
-        claim_number = claim_data.get("claim_number")
-        if not claim_number:
-            claim_number = f"MISSING-{uuid.uuid4().hex[:8]}"
-            logger.warning(f"Claim number missing for file {file_id}. Generated fallback: {claim_number}")
 
         cur.execute("""
             INSERT INTO claims (

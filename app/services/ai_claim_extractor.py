@@ -406,13 +406,13 @@ raw_text:
         for attempt in range(3):
             try:
                 response = await client.chat.completions.create(
-                    model="gpt-4o-mini",
+                    model="gpt-4-turbo",  # Using GPT-4 Turbo for maximum accuracy
                     messages=[
                         {"role": "system", "content": "You output strict JSON only."},
                         {"role": "user", "content": base_prompt},
                     ],
                     temperature=0,
-                    max_tokens=3500,
+                    max_tokens=4096,  # Increased for better extraction
                 )
                 break
             except Exception as e:
@@ -424,10 +424,38 @@ raw_text:
                 await asyncio.sleep(wait_time)
 
         content = response.choices[0].message.content.strip()
-        if content.startswith("```"):
-            content = content.split("```")[1].strip()
 
-        result = json.loads(content)
+        # Clean markdown code blocks
+        if content.startswith("```"):
+            parts = content.split("```")
+            if len(parts) >= 2:
+                content = parts[1].strip()
+                # Remove language identifier (json, JSON, etc.)
+                if content.lower().startswith("json"):
+                    content = content[4:].strip()
+
+        # Try to parse JSON with error handling
+        try:
+            result = json.loads(content)
+        except json.JSONDecodeError as e:
+            logger.warning(f"JSON parsing failed on first attempt: {e}. Attempting to repair...")
+
+            # Common JSON fixes
+            content = content.replace('\n', ' ')  # Remove newlines within strings
+            content = re.sub(r',(\s*[}\]])', r'\1', content)  # Remove trailing commas
+            content = re.sub(r'}\s*{', '},{', content)  # Fix missing commas between objects
+
+            try:
+                result = json.loads(content)
+                logger.info("JSON repair successful!")
+            except json.JSONDecodeError as e2:
+                logger.error(f"JSON repair failed: {e2}")
+                # Return error structure
+                return {
+                    "sections": [],
+                    "error": "ai_extraction_failed",
+                    "details": f"JSON parsing error: {str(e2)}"
+                }
 
         # Ensure value key exists
         for s in result.get("sections", []):
@@ -446,7 +474,8 @@ raw_text:
             return result
 
         # ---------- PASS 2 (LABEL-LOCKED RECOVERY) ----------
-        recovery_prompt = f"""
+        # PRODUCTION FIX: Use regular string with format() to avoid f-string brace escaping issues
+        recovery_prompt = """
 Some fields were NOT extracted even though their LABELS exist.
 
 STRICT RULES:
@@ -456,52 +485,80 @@ STRICT RULES:
 4. Dates: if range, return ONLY the FIRST date.
 5. Output JSON ONLY.
 6. In amount don't read $ sign.
+
 LABELS:
-{json.dumps(missing_labels, ensure_ascii=False)}
+{missing_labels}
 
-            MANDATORY OUTPUT FORMAT:
+MANDATORY OUTPUT FORMAT:
 
-            {
-            "sections": [
-                {
-                "id": "<same as input>",
-                "sectionName": "<same as input>",
-                "dataKey": "<same as input>",
-                "sectionOrder": "<same as input>",
-                "fields": [
-                    {
-                    "id": "<same>",
-                    "field": "<same>",
-                    "label": "<same>",
-                    "type": "<same>",
-                    "fieldOrder": "<same>",
-                    "confidence": "<same>",
-                    "value": "<extracted_value_or_null>"
-                    }
-                ]
-                }
-            ]
-            }
+{{
+  "sections": [
+    {{
+      "id": "<same as input>",
+      "sectionName": "<same as input>",
+      "dataKey": "<same as input>",
+      "sectionOrder": "<same as input>",
+      "fields": [
+        {{
+          "id": "<same>",
+          "field": "<same>",
+          "label": "<same>",
+          "type": "<same>",
+          "fieldOrder": "<same>",
+          "confidence": "<same>",
+          "value": "<extracted_value_or_null>"
+        }}
+      ]
+    }}
+  ]
+}}
 
 raw_text:
-{raw_text[:9000]}
-"""
+{raw_text_chunk}
+""".format(
+            missing_labels=json.dumps(missing_labels, ensure_ascii=False),
+            raw_text_chunk=raw_text[:9000]
+        )
 
         retry = await client.chat.completions.create(
-            model="gpt-4.1-mini",
+            model="gpt-4-turbo",  # Using GPT-4 Turbo for maximum accuracy in recovery
             messages=[
                 {"role": "system", "content": "You output strict JSON only."},
                 {"role": "user", "content": recovery_prompt},
             ],
             temperature=0,
-            max_tokens=1200,
+            max_tokens=4096,  # Increased for better recovery
         )
 
         retry_content = retry.choices[0].message.content.strip()
-        if retry_content.startswith("```"):
-            retry_content = retry_content.split("```")[1].strip()
 
-        recovered = json.loads(retry_content).get("values_by_label", {})
+        # Clean markdown code blocks
+        if retry_content.startswith("```"):
+            parts = retry_content.split("```")
+            if len(parts) >= 2:
+                retry_content = parts[1].strip()
+                if retry_content.lower().startswith("json"):
+                    retry_content = retry_content[4:].strip()
+
+        # Parse with error handling
+        try:
+            retry_response = json.loads(retry_content)
+
+            # PRODUCTION FIX: Build label-to-value mapping from response sections
+            # (not from non-existent "values_by_label" key)
+            recovered = {}
+            for section in retry_response.get("sections", []):
+                for field in section.get("fields", []):
+                    label = field.get("label", "").strip()
+                    value = field.get("value")
+                    if label and value not in (None, "", []):
+                        recovered[label] = value
+
+            logger.info(f"Recovery pass extracted {len(recovered)} field(s)")
+
+        except json.JSONDecodeError as e:
+            logger.warning(f"Recovery pass JSON parsing failed: {e}, skipping recovery")
+            recovered = {}
 
         # ---------- MERGE BY LABEL ----------
         for label, value in recovered.items():

@@ -51,8 +51,8 @@ def normalize_status(raw: Optional[str]) -> str:
     if not raw:
         return "Pending Review"
     r = str(raw).strip().lower()
-    if "complete" in r or r == "completed":
-        return "Completed"
+    if "complete" in r or r == "approved":
+        return "Approved"
     if r in ("review", "in review", "under review"):
         return "Review"
     # default fallback
@@ -78,24 +78,16 @@ async def review_queue(
     payer: Optional[str] = Query("all"),
     status: Optional[str] = Query("all"),
     confidence_cat: Optional[str] = Query("all"),
-    # confidence_cat: Optional[str] = Query("all", alias="confidence"),
     page: int = Query(1, ge=1),
     page_size: int = Query(6, ge=1, le=1000),
 ):
     try:
         pg = get_pg_conn()
 
-        # user_id = user.get("id")
-    
-        # cur = pg.cursor()
-        # cur.execute("""SELECT org_id, role FROM organization_memberships WHERE user_id = %s LIMIT 1
-        #             """, (user_id,))
-        # membership = cur.fetchone()
-        # org_id = membership[0]
 
         if status == "pending":
             status = "pending_review"
-
+            
         #=============Payer name================
         cur_opts1 = pg.cursor()
         cur_opts1.execute(
@@ -138,6 +130,7 @@ async def review_queue(
         table_headers = [
             {"field": "fileName", "label": "File"},
             {"field": "payer", "label": "Payer"},
+            {"field": "claim_number", "label": "Claim Number"}, 
             {"field": "confidence", "label": "Confidence"},
             {"field": "status", "label": "Status"},
             {
@@ -168,13 +161,9 @@ async def review_queue(
         where = ["uf.org_id = %s"]
         params = [org_id]
 
-        if status != "all":
-            where.append("uf.processing_status ILIKE %s")
-            params.append(status)
+        # Remove status filter from SQL; will filter on extraction_results below
 
-        if payer != "all":
-            where.append("p.name ILIKE %s")
-            params.append(f"%{payer}%")
+        # Remove payer filter from SQL; will filter on extraction_results below
 
         if search:
             q = f"%{search}%"
@@ -249,12 +238,33 @@ async def review_queue(
         table_rows = []
 
         for r in pg_rows:
-            file_id, filename, payer_name, status_val, reviewer_id, uploaded_at = r
+            file_id, filename, payer_name, file_status, reviewer_id, uploaded_at = r
             extractions = extraction_map.get(file_id, [])
-
+            # Always show if processing_status is 'ai_processing', even if no extractions
+            if file_status in ["ai_processing", "processing_in_progress"] and not extractions:
+                table_rows.append(
+                    {
+                        "file_id": file_id,
+                        "claim_id": None,
+                        "fileName": filename,
+                        "payer": payer_name or "-",
+                        "claim_number": "-",
+                        "confidence": "0",
+                        "status": file_status,
+                        "reviewer": reviewer_id or "Unassigned",
+                        "uploaded": uploaded_at,
+                        "is_processing": file_status == "ai_processing" if True else False,
+                    }
+                )
+            # Otherwise, use extraction logic as before, but filter by status and payerName if needed
             for ext in extractions:
+                ext_status = ext.get("status", "")
+                ext_payer = ext.get("payerName", "")
+                if status != "all" and ext_status != status:
+                    continue
+                if payer != "all" and (not ext_payer or payer.lower() not in ext_payer.lower()):
+                    continue
                 conf_val = float(ext.get("aiConfidence") or 0)
-
                 if confidence_cat != "all":
                     if confidence_cat == "high" and conf_val < 90:
                         continue
@@ -263,21 +273,22 @@ async def review_queue(
                     if confidence_cat == "low" and conf_val >= 80:
                         continue
                 claim_line_id = ext.get("_id", "")
-                status = ext.get("status", "")
                 reviewer_ids = ext.get("reviewerId", None)
-           
+                claim_number = ext.get("claimNumber", "N/A")
                 table_rows.append(
                     {
                         "file_id": file_id,
                         "claim_id": claim_line_id, 
                         "fileName": filename,
                         "payer": ext.get("payerName") or payer_name or "Unknown",
+                        "claim_number": claim_number or "N/A",
                         "confidence": f"{int(conf_val)}",
-                        "status": status,
+                        "status": ext_status,
                         "reviewer": reviewer_ids or "Unassigned",
                         "uploaded": uploaded_at,
                     }
                 )
+        
 
         # ---------------------------
         # ✅ FIXED PAGINATION (ONLY CHANGE)

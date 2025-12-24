@@ -168,7 +168,7 @@ async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: s
             minor += 1
             next_version = f"{major}.{minor}"
 
-        if check == "exception" and result.get("status") != "completed":
+        if check == "exception" and result.get("status") != "approved":
             # Update extraction status to 'exception' in extraction_results collection
             await extraction_collection.update_one(
                 {"_id": claim_id},
@@ -182,7 +182,7 @@ async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: s
             return {"message": "Claim marked as exception successfully.", "status": 200}  
          
         # Handle draft case
-        elif check == "draft" and result.get("status") != "completed" and result.get("status") != "exception":
+        elif check == "draft" and result.get("status") != "approved" and result.get("status") != "exception":
             # Insert new version record
             await version_collection.insert_one({
                 "file_id": file_id,
@@ -213,11 +213,11 @@ async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: s
 
             return {"message": "Claim updated successfully.", "status": 200}
         
-        elif check == "confirmed" and result.get("status") != "completed" and result.get("status") != "exception":
+        elif check == "confirmed" and result.get("status") != "approved" and result.get("status") != "exception":
             # Update extraction status in extraction_results collection
             await extraction_collection.update_one(
                 {"_id": claim_id},
-                {"$set": {"status": "completed"}}
+                {"$set": {"status": "approved"}}
             )
           
             await version_collection.insert_one({
@@ -227,12 +227,12 @@ async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: s
             "claim": claim_json,
             "created_at": datetime.utcnow(),
             "updated_by": updated_by,
-            "status": "completed"
+            "status": "approved"
             })
 
             await version_collection.find_one_and_update(
                 query,
-                {"$set": {"status": "completed"}},
+                {"$set": {"status": "approved"}},
                 sort=[("created_at", 1)],
                 return_document=True
             )
