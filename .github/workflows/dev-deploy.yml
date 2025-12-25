@@ -1,0 +1,125 @@
+name: eob-be dev deployment
+
+on:
+  push:
+    branches:
+      - eob-devops
+
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to deploy (manual trigger)"
+        required: true
+        default: "eob-devops"
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # Checkout code
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.inputs.branch || github.ref_name }}
+
+      # Create .env file from GitHub Secret (clean & masked)
+      - name: Create .env File from Secret
+        run: |
+          echo "::add-mask::${{ secrets.DEV_ENV }}"
+          printf "%s" "${{ secrets.DEV_ENV }}" > .env
+
+          # Remove whitespace around keys to avoid "invalid env file" errors
+          sed -i 's/[[:space:]]\+=/=/g' .env
+          sed -i 's/[[:space:]]$//' .env
+
+      # Build Docker Image locally
+      - name: Build Docker Image
+        run: |
+          IMAGE_NAME="eob-be-dev"
+          docker build -t $IMAGE_NAME .
+
+      # Save Docker image into a TAR file
+      - name: Save Docker Image to TAR
+        run: |
+          docker save eob-be-dev | gzip > eob-be-dev.tar.gz
+
+      # Prepare remote folders
+      - name: Ensure remote folders exist
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEV_SERVER_HOST }}
+          username: ${{ secrets.DEV_SERVER_USERNAME }}
+          password: ${{ secrets.DEV_SERVER_PASSWORD }}
+          port: 2200
+          script: |
+            mkdir -p ~/artifacts
+            mkdir -p ~/eob-be-dev
+
+      # Upload .env file to server
+      - name: Upload .env to Server
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ secrets.DEV_SERVER_HOST }}
+          username: ${{ secrets.DEV_SERVER_USERNAME }}
+          password: ${{ secrets.DEV_SERVER_PASSWORD }}
+          port: 2200
+          source: ".env"
+          target: "~/eob-be-dev/"
+
+      # Upload TAR to server
+      - name: Upload TAR File to Server
+        uses: appleboy/scp-action@v0.1.4
+        with:
+          host: ${{ secrets.DEV_SERVER_HOST }}
+          username: ${{ secrets.DEV_SERVER_USERNAME }}
+          password: ${{ secrets.DEV_SERVER_PASSWORD }}
+          port: 2200
+          source: "eob-be-dev.tar.gz"
+          target: "~/artifacts/"
+
+      # Deploy container on server
+      - name: SSH and Deploy CWS Service
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEV_SERVER_HOST }}
+          username: ${{ secrets.DEV_SERVER_USERNAME }}
+          password: ${{ secrets.DEV_SERVER_PASSWORD }}
+          port: 2200
+          script: |
+            echo "Loading Docker image..."
+            gunzip -c ~/artifacts/eob-be-dev.tar.gz | docker load
+
+            echo "Stopping old container..."
+            docker rm -f eob-be-dev || true
+
+            echo "Starting new container..."
+            docker run -d \
+              --name eob-be-dev \
+              --restart always \
+              --network essentials_app-network \
+              --env-file ~/eob-be-dev/.env \
+              eob-be-dev:latest
+
+            echo "Cleaning unused images..."
+            docker image prune -f
+
+      # Remove local TAR
+      - name: Clean local artifacts
+        run: rm -rf eob-be-dev.tar.gz
+
+      # Remove remote TAR
+      - name: Remove remote TAR
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEV_SERVER_HOST }}
+          username: ${{ secrets.DEV_SERVER_USERNAME }}
+          password: ${{ secrets.DEV_SERVER_PASSWORD }}
+          port: 2200
+          script: |
+            rm -rf ~/artifacts/eob-be-dev.tar.gz

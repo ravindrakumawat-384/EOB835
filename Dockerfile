@@ -1,27 +1,25 @@
-# Use official Python image as base
-FROM python:3.12.3-slim
-
-# Set working directory
+FROM python:3.11-slim
+ 
 WORKDIR /app
-
-# Install system dependencies
+ 
+# ---- System runtime dependencies ----
 RUN apt-get update && apt-get install -y \
-    build-essential \
-    libpq-dev \
-    gcc \
+    libpq5 \
+    libmagic1 \
+    tesseract-ocr \
+    poppler-utils \
+    libjpeg62-turbo \
+    zlib1g \
+    libffi8 \
     && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements if present
-COPY requirements.txt ./
-
-# Install Python dependencies
+ 
+# ---- Python dependencies ----
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy project files
+ 
+# ---- App code ----
 COPY . .
-
-# Expose port (adjust if needed for FastAPI/Uvicorn)
+ 
 EXPOSE 8001
-
-# Default command to run the API (adjust if needed)
+ 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
