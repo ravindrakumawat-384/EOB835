@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 import uuid
 import psycopg2
@@ -47,7 +47,7 @@ def insert_upload_file(
                 processing_status = %s
             WHERE id = %s
             """,
-            (filename, s3_path, datetime.utcnow(), status, file_id)
+            (filename, s3_path, datetime.now(timezone.utc), status, file_id)
         )
     else:
         # Generate new UUID for file ID
@@ -59,7 +59,7 @@ def insert_upload_file(
                 id, org_id, batch_id, original_filename, storage_path, mime_type, file_size, hash, upload_source, uploaded_by, uploaded_at, processing_status, reviwer_id
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (file_id, org_id, batch_id, filename, s3_path, mime_type, file_size, file_hash, upload_source, uploaded_by, datetime.utcnow(), status, uploaded_by)
+            (file_id, org_id, batch_id, filename, s3_path, mime_type, file_size, file_hash, upload_source, uploaded_by, datetime.now(timezone.utc), status, uploaded_by)
         )
     
     conn.commit()
@@ -67,7 +67,7 @@ def insert_upload_file(
     conn.close()
     return file_id
 
-def update_file_status(file_id: str, status: str, payer_id: str, error_message: Optional[str] = None) -> bool:
+def update_file_status(file_id: str, status: str, error_message: Optional[str] = None) -> bool:
     """
     Update the processing status and error message of an uploaded file.
     
@@ -94,6 +94,7 @@ def update_file_status(file_id: str, status: str, payer_id: str, error_message: 
         
         logger.info(f"📝 Updating file ID {file_id} to status '{status}'")
         # Update the record
+        now_utc = datetime.now(timezone.utc)
         if error_message:
             logger.info(f"📝 Setting error message: {error_message}")
             cur.execute(
@@ -102,17 +103,17 @@ def update_file_status(file_id: str, status: str, payer_id: str, error_message: 
                 SET processing_status = %s, processing_error_message = %s, updated_at = %s
                 WHERE id = %s
                 """,
-                (status, error_message, datetime.utcnow(), payer_id, file_id)
+                (status, error_message, now_utc, file_id)
             )
         else:
             logger.info(f"📝 Clearing error message")
             cur.execute(
                 """
                 UPDATE upload_files 
-                SET processing_status = %s, updated_at = %s, detected_payer_id = %s
+                SET processing_status = %s, updated_at = %s
                 WHERE id = %s
                 """,
-                (status, datetime.utcnow(), payer_id, file_id)
+                (status, now_utc, file_id)
             )
         
         conn.commit()

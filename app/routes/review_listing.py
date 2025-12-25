@@ -241,7 +241,7 @@ async def review_queue(
             file_id, filename, payer_name, file_status, reviewer_id, uploaded_at = r
             extractions = extraction_map.get(file_id, [])
             # Always show if processing_status is 'ai_processing', even if no extractions
-            if file_status in ["ai_processing", "processing_in_progress"] and not extractions:
+            if file_status == "ai_processing" and not extractions:
                 table_rows.append(
                     {
                         "file_id": file_id,
@@ -288,12 +288,11 @@ async def review_queue(
                         "uploaded": uploaded_at,
                     }
                 )
-        
-
         # ---------------------------
         # ✅ FIXED PAGINATION (ONLY CHANGE)
         # ---------------------------
-        total_records = len(table_rows)
+        # Show only 'pending_review' count in total_records
+        total_records = sum(1 for row in table_rows if row.get('status') == 'pending_review')
 
         total_pages = (total_records + page_size - 1) // page_size
         if page > total_pages and total_pages > 0:

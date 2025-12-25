@@ -16,11 +16,11 @@ celery_app.conf.update(
     timezone='UTC',
     enable_utc=True,
     
-    # Beat schedule - runs every 3 minutes
+    # Beat schedule - runs every 5 minutes
     beat_schedule={
-        'process-pending-files-every-3-minutes': {
+        'process-pending-files-every-5-minutes': {
             'task': 'app.tasks.file_processor.process_pending_files',
-            'schedule': 180.0,  # Every 3 minutes (in seconds)
+            'schedule': 300.0,  # Every 5 minutes (in seconds)
         },
     },
 )

@@ -60,24 +60,27 @@ async def upload_files(user: Dict[str, Any] = Depends(get_current_user), files: 
     ext_collection = db_module.db["extraction_results"]  
     claim_version = db_module.db["claim_version"]  
     for file in files:
-        # 1. Check file size
-        if file.size and file.size > MAX_FILE_SIZE:
-            responses.append({"filename": file.filename, "status": "error", "message": "File too large (max 50MB)"})
-            continue
         try:
             content = await file.read()
         except Exception:
-            responses.append({"filename": file.filename, "status": "error", "message": "File is corrupted"})
+            raise HTTPException(status_code=400, detail={"filename": file.filename, "status": "error", "message": "File is corrupted"})
+        # 1. Check file size
+        file_hash = calculate_file_hash(content)
+ 
+        if check_hash_exists(file_hash):
+            raise HTTPException(
+                status_code=400,
+                detail=f"This file is already uploaded: {file.filename}"
+            )
+        
+        if file.size and file.size > MAX_FILE_SIZE:
+            responses.append({"filename": file.filename, "status": "error", "message": "File too large (max 50MB)"})
             continue
+        
         if len(content) > MAX_FILE_SIZE:
             responses.append({"filename": file.filename, "status": "error", "message": "File too large (max 50MB)"})
             continue
-        # 2. Hash check
-        file_hash = calculate_file_hash(content)
-        if check_hash_exists(file_hash):
-            if is_835_generated(file_hash):
-                responses.append({"filename": file.filename, "status": "error", "message": "Already generated"})
-                continue
+        
         # 3. Format/requirement check
         if not is_valid_format(content):
             responses.append({"filename": file.filename, "status": "error", "message": "File is not valid."})
@@ -114,5 +117,5 @@ async def upload_files(user: Dict[str, Any] = Depends(get_current_user), files: 
             status="ai_processing"  # Set status to "Pending Review" on first upload
         )
         
-    return {"success": "File Upload successfully."}
+        return {"success": "File Upload successfully."}
 

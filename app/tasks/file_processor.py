@@ -18,6 +18,7 @@ from typing import List
 from app.services.mongo_extraction import store_extraction_result
 
 logger = get_logger(__name__)
+DB = init_db()
 
 async def process_single_file_async(file_record):
     """
@@ -100,8 +101,54 @@ async def process_single_file_async(file_record):
         )
         pg.commit()
         
-        cur.execute("SELECT id FROM templates WHERE payer_id = %s", (payer_id,))
-        template_row = cur.fetchone()
+        # cur.execute("SELECT id FROM templates WHERE payer_id = %s", (payer_id,))
+        # template_row = cur.fetchone()
+
+
+        if payer_id:
+            cur.execute("SELECT id FROM templates WHERE payer_id = %s", (payer_id,))
+            template_row = cur.fetchone()
+        else:
+            ext_collection = DB["extraction_results"]  
+            claim_version = DB["claim_version"] 
+            cur.execute(
+                """
+                UPDATE upload_files
+                SET processing_status = %s
+                WHERE id = %s
+                """,
+                ('need_template', file_id)
+            )
+
+            pg.commit()
+            claim_doc = {
+            "_id": str(uuid.uuid4()),
+            "fileId": file_id,
+            "rawExtracted": '',
+            "claim": '',
+            "aiConfidence": 0,
+            "extractionStatus": "",
+            "payerName": '',
+            "claimNumber": 0,
+            "totalExtractedAmount": 0,
+            "createdAt": datetime.datetime.utcnow(),
+            "status": "need_template",
+            "reviewerId": uploaded_by
+            }
+            ext_collection.insert_one(claim_doc)
+
+            claim_version.insert_one({
+            "file_id": file_id,
+            "extraction_id": claim_doc['_id'],
+            "version": "1.0",
+            "claim": '',
+            "created_at": datetime.datetime.utcnow(),
+            "updated_by": uploaded_by,
+            "status": "need_template"})
+
+
+
+
         cur.close()
         pg.close()
 
