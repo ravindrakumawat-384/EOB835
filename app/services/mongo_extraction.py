@@ -35,12 +35,12 @@ async def store_extraction_result(db, file_id: str, ai_result: Dict[str, Any], p
             "fileId": file_id,
             "rawExtracted": "raw_text",
             "claim": flat_claims.get("section") if isinstance(flat_claims, dict) else "",
-            "aiConfidence": 90,
+            "aiConfidence": 95,
             "extractionStatus": "success",
             "payerName": payer_name,
             "claimNumber": flat_claims.get("claim_number") if isinstance(flat_claims, dict) else 0,
             "totalExtractedAmount": flat_claims.get("total_paid") if isinstance(flat_claims, dict) else 0,
-            "createdAt": datetime.datetime.utcnow(),
+            "createdAt": datetime.datetime.now(datetime.timezone.utc),
             "status": "pending_review",
             "reviewerId": uploaded_by
         }
@@ -51,7 +51,7 @@ async def store_extraction_result(db, file_id: str, ai_result: Dict[str, Any], p
             "extraction_id": claim_doc['_id'],
             "version": "1.0",
             "claim": flat_claims.get("section") if isinstance(flat_claims, dict) else "",
-            "created_at": datetime.datetime.utcnow(),
+            "created_at": datetime.datetime.now(datetime.timezone.utc),
             "updated_by": uploaded_by,
             "status": "pending_review"})
 
@@ -64,7 +64,7 @@ async def store_extraction_result(db, file_id: str, ai_result: Dict[str, Any], p
             "fileId": file_id,
             "rawExtracted": "raw_text",
             "extractionStatus": "failed",
-            "createdAt": datetime.datetime.utcnow()
+            "createdAt": datetime.datetime.now(datetime.timezone.utc)
         }
         await ext_collection.insert_one(claim_doc)
         logger.info(f"Stored failed extraction result for file {file_id} in MongoDB with _id {claim_doc['_id']}")
