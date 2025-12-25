@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     build-essential \
     libpq-dev \
     gcc \
+    libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements if present
@@ -25,4 +26,3 @@ EXPOSE 8001
 
 # Default command to run the API (adjust if needed)
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
- 
