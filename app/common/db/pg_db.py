@@ -6,14 +6,21 @@ logger = get_logger(__name__)
 
 # Example connection (replace with your config)
 def get_pg_conn():
-    import os
-    dsn = os.getenv("POSTGRES_DSN")
-    if dsn:
-        return psycopg2.connect(dsn)
+    # import os
+    # dsn = "postgresql://aman0622:password1234@localhost:5432/eob_db"
+    # if dsn:
+    #     return psycopg2.connect(dsn)
+   
     return psycopg2.connect(
-        dbname="eob_test_db",
-        user="fastapi_user",
-        password="password123",
+        # dbname="eob_test_db",
+        # user="fastapi_user",
+        # password="password123",
+        # host="127.0.0.1",
+        # port="5432"
+
+        dbname="eob_db",
+        user="aman0622",
+        password="password1234",
         host="127.0.0.1",
         port="5432"
     )
