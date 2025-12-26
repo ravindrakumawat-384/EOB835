@@ -1,6 +1,7 @@
 import io
 from typing import Optional
 import mimetypes
+# from paddleocr import PaddleOCR
 
 # PDF
 try:
@@ -30,6 +31,8 @@ except ImportError:
     ImageFilter = None
     ImageEnhance = None
 
+# ocr_model = PaddleOCR(use_angle_cls=True, lang='en')
+
 def extract_text_from_file(content: bytes, filename: str, mime_type: Optional[str] = None) -> str:
     """
     Extract text from PDF, DOCX, TXT, or image files.
@@ -47,15 +50,15 @@ def extract_text_from_file(content: bytes, filename: str, mime_type: Optional[st
         # Collect from multiple strategies and merge for maximal coverage
         sources = []
 
-        # 1) pdfplumber: extract text and tables
+        # 1) pdfplumber: extract text and tables (with improved spacing)
         if pdfplumber:
             try:
                 with pdfplumber.open(io.BytesIO(content)) as pdf:
                     page_texts = []
                     table_texts = []
                     for page in pdf.pages:
-                        # Text
-                        txt = page.extract_text() or ""
+                        # Text with spacing tolerance
+                        txt = page.extract_text(layout=True) or ""
                         if txt:
                             page_texts.append(txt)
                         # Tables (flatten cells)
@@ -89,29 +92,29 @@ def extract_text_from_file(content: bytes, filename: str, mime_type: Optional[st
         #         sources.append(f"[PyPDF2 extraction failed: {e}]")
 
         # 3) OCR with Tesseract (preferred for scanned PDFs)
-        if convert_from_bytes and pytesseract and Image:
-            try:
-                pages = convert_from_bytes(content, dpi=300)
-                ocr_text_chunks = []
-                for img in pages:
-                    # Preprocess to improve OCR
-                    try:
-                        if ImageEnhance:
-                            img = ImageEnhance.Contrast(img).enhance(1.6)
-                        if ImageFilter:
-                            img = img.filter(ImageFilter.SHARPEN)
-                        img = img.convert("L")
-                    except Exception:
-                        # If preprocessing fails, continue with original image
-                        pass
-                    custom_config = "--oem 1 --psm 6"
-                    ocr_text_chunks.append(pytesseract.image_to_string(img, config=custom_config))
-                ocr_text = "\n".join(ocr_text_chunks)
-                if ocr_text.strip():
-                    sources.append(ocr_text)
-            except Exception:
-                # Continue to merging if OCR fails
-                pass
+        # if convert_from_bytes and pytesseract and Image:
+        #     try:
+        #         pages = convert_from_bytes(content, dpi=300)
+        #         ocr_text_chunks = []
+        #         for img in pages:
+        #             # Preprocess to improve OCR
+        #             try:
+        #                 if ImageEnhance:
+        #                     img = ImageEnhance.Contrast(img).enhance(1.6)
+        #                 if ImageFilter:
+        #                     img = img.filter(ImageFilter.SHARPEN)
+        #                 img = img.convert("L")
+        #             except Exception:
+        #                 # If preprocessing fails, continue with original image
+        #                 pass
+        #             custom_config = "--oem 1 --psm 6"
+        #             ocr_text_chunks.append(pytesseract.image_to_string(img, config=custom_config))
+        #         ocr_text = "\n".join(ocr_text_chunks)
+        #         if ocr_text.strip():
+        #             sources.append(ocr_text)
+        #     except Exception:
+        #         # Continue to merging if OCR fails
+        #         pass
 
         # 4) Merge all sources and return
         combined = "\n".join(s for s in sources if s)

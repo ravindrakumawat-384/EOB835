@@ -88,7 +88,8 @@ async def upload_files(user: Dict[str, Any] = Depends(get_current_user), files: 
         # 4. Register hash (simulate DB insert)
         register_uploaded_hash(file_hash)
         # 5. Save file and metadata (to S3)
-        s3_path = s3_client.upload_file(content, file.filename)
+        s3_key = f"claims/{file.filename}"
+        s3_path = s3_client.upload_file(content, s3_key)
         if not s3_path:
             responses.append({"filename": file.filename, "status": "error", "message": "Failed to upload to S3"})
             continue

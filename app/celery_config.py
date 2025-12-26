@@ -20,7 +20,7 @@ celery_app.conf.update(
     beat_schedule={
         'process-pending-files-every-5-minutes': {
             'task': 'app.tasks.file_processor.process_pending_files',
-            'schedule': 300.0,  # Every 5 minutes (in seconds)
+            'schedule': 180.0,  # Every 5 minutes (in seconds)
         },
     },
 )

@@ -48,7 +48,7 @@ async def process_single_file_async(file_record):
         
         # Extract text
         raw_text = extract_text_from_file(file_content, filename, mime_type)
-        print(f'📝 Extracted text length: {len(raw_text)} characters')
+        # print(f'📝 Extracted text length: {raw_text} characters')
         if not raw_text or len(raw_text.strip()) < 50:
             logger.error(f"File {filename} appears unreadable")
             print(f"❌ Text extraction failed - insufficient content")
