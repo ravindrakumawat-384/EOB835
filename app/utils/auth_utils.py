@@ -6,17 +6,28 @@ from ..common.config import settings
 from uuid import uuid4
 from ..services.email_service import send_reset_email
 from jose import JWTError, ExpiredSignatureError
-
+import bcrypt
 
 _pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 def hash_password(password: str) -> str:
+    # Truncate password to 72 bytes for bcrypt compatibility
+    if isinstance(password, str):
+        password = password.encode("utf-8")[:72].decode("utf-8", errors="ignore")
     return _pwd_ctx.hash(password)
 
 
-def verify_password(plain: str, hashed: str) -> bool:
-    return _pwd_ctx.verify(plain, hashed)
+# def verify_password(plain: str, hashed: str) -> bool:
+#     print("Verifying password-------->>> ", _pwd_ctx.verify(plain, hashed))
+#     return _pwd_ctx.verify(plain, hashed)
+
+def verify_password(password: str, password_hash: str) -> bool:
+    # Truncate password to 72 bytes for bcrypt compatibility
+    if isinstance(password, str):
+        password = password.encode("utf-8")[:72].decode("utf-8", errors="ignore")
+    return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+
 
 
 def _now() -> datetime:

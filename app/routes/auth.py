@@ -118,11 +118,13 @@ async def register(payload: RegisterRequest) -> Any:
 
     user_id = payload.email + "-" + str(int(datetime.utcnow().timestamp()))
     now = datetime.utcnow()
+    # Truncate password to 72 bytes for bcrypt compatibility
+    password = payload.password.encode("utf-8")[:72].decode("utf-8", errors="ignore")
     with get_pg_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO users (id, email, password_hash, full_name, is_active, created_at, updated_at) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                (user_id, payload.email, hash_password(payload.password), payload.full_name, True, now, now)
+                (user_id, payload.email, hash_password(password), payload.full_name, True, now, now)
             )
             access = create_access_token(user_id)
             refresh = create_refresh_token(user_id)
@@ -139,8 +141,10 @@ async def register(payload: RegisterRequest) -> Any:
 async def login(payload: LoginRequest) -> Any:
     user = await _get_user_by_email(payload.email)
     print("user-----> ", user)
-    if not user or not verify_password(payload.password, user["password_hash"]):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials. Please check username and password")
+    # Truncate password to 72 bytes for bcrypt compatibility
+    password = payload.password.encode("utf-8")[:72].decode("utf-8", errors="ignore")
+    if not user or not verify_password(password, user["password_hash"]):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials. Please check username and password. Note: Passwords longer than 72 bytes are truncated.")
 
     # Invitation link expiration logic
     if not user.get("is_active", True) and not user.get("last_login_at"):
@@ -373,7 +377,7 @@ async def reset_password(payload: ResetPasswordRequest) -> Any:
     token = payload.token
     print("token",token)
 
-    new_password = payload.new_password
+    new_password = payload.new_password.encode("utf-8")[:72].decode("utf-8", errors="ignore")
     print("new_password", new_password)
 
     if not token or not new_password:
@@ -452,11 +456,13 @@ async def change_password(payload: ChangePasswordRequest, user: dict = Depends(g
                     logger.error(f"User not found: {user_id}")
                     raise HTTPException(status_code=404, detail="User not found")
                 # Verify old password
-                if not verify_password(payload.old_password, user_row["password_hash"]):
+                old_password = payload.old_password.encode("utf-8")[:72].decode("utf-8", errors="ignore")
+                if not verify_password(old_password, user_row["password_hash"]):
                     logger.warning(f"Change password failed: invalid old password for user {user_row['id']}")
                     raise HTTPException(status_code=400, detail="Invalid old password")
                 # Update password
-                new_hash = hash_password(payload.new_password)
+                new_password = payload.new_password.encode("utf-8")[:72].decode("utf-8", errors="ignore")
+                new_hash = hash_password(new_password)
                 cur.execute(
                     "UPDATE users SET password_hash = %s, updated_at = %s WHERE id = %s",
                     (new_hash, datetime.utcnow(), user_row["id"])
