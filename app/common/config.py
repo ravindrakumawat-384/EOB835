@@ -1,4 +1,5 @@
-from pydantic import BaseSettings, Field
+from pydantic_settings import BaseSettings
+from pydantic import Field
 from functools import lru_cache
 from typing import Optional
 
@@ -30,10 +31,13 @@ class Settings(BaseSettings):
     FRONTEND_URL: Optional[str] = "http://localhost:4200"
 
     # AWS S3 Configuration
-    AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
-    AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
-    AWS_REGION = os.getenv("AWS_REGION")
-    S3_BUCKET = os.getenv("S3_BUCKET")
+    AWS_ACCESS_KEY_ID: Optional[str] = None
+    AWS_SECRET_ACCESS_KEY: Optional[str] = None
+    AWS_REGION: Optional[str] = None
+    S3_BUCKET: Optional[str] = None
+
+    # OpenAI Configuration
+    OPENAI_API_KEY: Optional[str] = None  
 
 
     class Config:

@@ -27,10 +27,6 @@ except ImportError as e:
     OPENAI_AVAILABLE = False
     OPENAI_API_KEY = None
 
-    
-
-
-
 
 async def ai_extract_claims(raw_text: str, dynamic_key: List[str]) -> Dict[str, Any]:
     """
@@ -44,16 +40,6 @@ async def ai_extract_claims(raw_text: str, dynamic_key: List[str]) -> Dict[str, 
     if OPENAI_AVAILABLE and OPENAI_API_KEY:
         try:
             result = await extract_with_openai(raw_text, dynamic_key)
-            # if result.get("claims"):
-            #     return result
-            # else:
-            #     logger.warning("OpenAI returned empty claims, using fallback")
-            #     return create_fallback_result(raw_text)
-
-
-            
-
-
             return result
         except Exception as e:
             logger.error("OpenAI extraction failed: %s", str(e))
@@ -165,122 +151,6 @@ def create_fallback_result(raw_text: str) -> Dict[str, Any]:
         "claims": claims
     }
 
-# def extract_with_openai(raw_text: str, dynamic_key: List[str]) -> Dict[str, Any]:
-#     """
-#     Use OpenAI to extract structured data matching database schema with confidence scores.
-#     """
-#     try:
-#         # Initialize OpenAI client with configured API key
-#         client = openai.OpenAI(api_key=OPENAI_API_KEY)
-        
-#         prompt = f"""
-#         You are given TWO inputs:
-
-# INPUT 1:
-# A JSON object named `dynamic_keys` (structure exactly like provided), containing:
-# - sections (id, sectionName, dataKey, sectionOrder)
-# - fields (id, field, label, type, fieldOrder, confidence)
-
-# INPUT 2:
-# Raw document text.
-
-# GOAL:
-# Use `dynamic_keys` to CONTROL the response structure.
-# Extract values from text and RETURN a response JSON where:
-# - Structure comes from `dynamic_keys`
-# - Data comes from extracted text
-
-# RULES (STRICT):
-
-# 1. `dynamic_keys` is LEVEL-0 (source schema).
-# 2. Each section in `dynamic_keys` is LEVEL-1.
-# 3. Each field inside a section is LEVEL-2.
-# 4. Do NOT add, remove, rename, or reorder sections or fields.
-# 5. Do NOT hardcode field names.
-# 6. Do NOT invent values.
-# 7. Extract values ONLY if present in text; otherwise return null.
-
-# BEHAVIOR:
-
-# For EACH section in `dynamic_keys`:
-# - Create the same section in response.
-# - Copy `sectionName`, `sectionOrder`, and `dataKey`.
-
-# For EACH field inside the section:
-# - Create the same field object.
-# - Add ONE new key named `"value"`.
-# - `"value"` must contain the extracted value from text.
-# - Extraction must respect section context.
-# - Type hint (`type`) guides format (date, number, text).
-
-# OUTPUT FORMAT (FINAL RESPONSE):
-
-# {
-#   "sections": [
-#     {
-#       "sectionName": "<sectionName>",
-#       "dataKey": "<dataKey>",
-#       "sectionOrder": <number>,
-#       "fields": [
-#         {
-#           "field": "<field>",
-#           "value": "<extracted_value_or_null>"
-#         }
-#       ]
-#     }
-#   ]
-# }
-
-# CONSTRAINTS:
-# - Output ONLY valid JSON.
-# - No explanations.
-# - No extra keys.
-# - No confidence, label, or type in response.
-# - Dynamic structure must work for ANY future `dynamic_keys`.
-
-# RETURN ONLY JSON.
-
-
-
-#         Extract data from this text:
-#         {raw_text[:4000]}
-
-        
-#         """        
-#         response = client.chat.completions.create(
-#             model="gpt-4o-mini",
-#             messages=[{"role": "user", "content": prompt}],
-#             temperature=0.1,
-#             max_tokens=3000
-#         )
-        
-#         content = response.choices[0].message.content.strip()
-#         print( "OpenAI raw response content:=========", content)
-        
-#         # Clean up response if it has markdown formatting
-#         if content.startswith("```json"):
-#             content = content[7:]
-#         if content.endswith("```"):
-#             content = content[:-3]
-#         content = content.strip()
-        
-#         result = json.loads(content)
-        
-#         # Ensure confidence is included
-#         if "confidence" not in result:
-#             result["confidence"] = 70  # Default confidence
-#         print( "OpenAI extraction result:=========", result)
-#         return result
-        
-#     except json.JSONDecodeError as e:
-#         logger.error("JSON decode error: %s", str(e))
-#         logger.error("Raw content: %s", content)
-#         return {"claims": [], "confidence": 0, "error": "JSON decode error: " + str(e)}
-#     except Exception as e:
-#         logger.error("OpenAI API error: %s", str(e))
-#         return {"claims": [], "confidence": 0, "error": "API error: " + str(e)}
-
-
 
 def _build_extraction_hints(raw_text: str) -> Dict[str, Any]:
     """
@@ -342,63 +212,63 @@ async def extract_with_openai(
     AI-only, label-locked, two-pass extraction.
     Guarantees: if LABEL exists in raw_text, value will not be null.
     """
-    print(raw_text)
-    print(dynamic_keys)
+    print("raw_text=======", raw_text)
+    print("dynamic_keys=======", dynamic_keys)
     try:
         client = openai.AsyncOpenAI(api_key=OPENAI_API_KEY)
 
         # ---------- PASS 1 ----------
         base_prompt = f"""
-You are a STRICT data extractor.
+            You are a STRICT data extractor.
 
-RULES:
-1. dynamic_keys DEFINES THE SCHEMA.
-2. COPY structure EXACTLY.
-3. Add ONLY one key: "value".
-4. Extract ONLY from raw_text.
-5. If value not found, set null.
-6. DO NOT guess.
-7. Dates: if range, return ONLY the FIRST date.
+            RULES:
+            1. dynamic_keys DEFINES THE SCHEMA.
+            2. COPY structure EXACTLY.
+            3. Add ONLY one key: "value".
+            4. Extract ONLY from raw_text.
+            5. If value not found, set null.
+            6. DO NOT guess.
+            7. Dates: if range, return ONLY the FIRST date.
 
-EXTRACTION STRATEGY:
-- For each field, locate its LABEL followed by ":".
-- Extract the value immediately after the label.
-- Stop at the next label or line break.
-- If label exists, value MUST be extracted.
+            EXTRACTION STRATEGY:
+            - For each field, locate its LABEL followed by ":".
+            - Extract the value immediately after the label.
+            - Stop at the next label or line break.
+            - If label exists, value MUST be extracted.
 
-MANDATORY OUTPUT FORMAT:
+            MANDATORY OUTPUT FORMAT:
 
-{{
-"sections": [
-    {{
-    "id": "<same as input>",
-    "sectionName": "<same as input>",
-    "dataKey": "<same as input>",
-    "sectionOrder": <same as input>,
-    "fields": [
-        {{
-        "id": "<same>",
-        "field": "<same>",
-        "label": "<same>",
-        "type": "<same>",
-        "fieldOrder": <same>,
-        "confidence": <same>,
-        "value": "<extracted_value_or_null>"
-        }}
-    ]
-    }}
-]
-}}
+            {{
+            "sections": [
+                {{
+                "id": "<same as input>",
+                "sectionName": "<same as input>",
+                "dataKey": "<same as input>",
+                "sectionOrder": <same as input>,
+                "fields": [
+                    {{
+                    "id": "<same>",
+                    "field": "<same>",
+                    "label": "<same>",
+                    "type": "<same>",
+                    "fieldOrder": <same>,
+                    "confidence": <same>,
+                    "value": "<extracted_value_or_null>"
+                    }}
+                ]
+                }}
+            ]
+            }}
 
-OUTPUT:
-VALID JSON ONLY. NO TEXT.
+            OUTPUT:
+            VALID JSON ONLY. NO TEXT.
 
-dynamic_keys:
-{json.dumps(dynamic_keys, ensure_ascii=False)}
+            dynamic_keys:
+            {json.dumps(dynamic_keys, ensure_ascii=False)}
 
-raw_text:
-{raw_text[:6000]}
-"""
+            raw_text:
+            {raw_text[:6000]}
+            """
 
         # 3. Call AI with Retry Logic
         import asyncio
@@ -476,46 +346,46 @@ raw_text:
         # ---------- PASS 2 (LABEL-LOCKED RECOVERY) ----------
         # PRODUCTION FIX: Use regular string with format() to avoid f-string brace escaping issues
         recovery_prompt = """
-Some fields were NOT extracted even though their LABELS exist.
+            Some fields were NOT extracted even though their LABELS exist.
 
-STRICT RULES:
-1. Extract values ONLY by LABEL.
-2. Use ONLY raw_text.
-3. If label exists, value MUST be extracted.
-4. Dates: if range, return ONLY the FIRST date.
-5. Output JSON ONLY.
-6. In amount don't read $ sign.
+            STRICT RULES:
+            1. Extract values ONLY by LABEL.
+            2. Use ONLY raw_text.
+            3. If label exists, value MUST be extracted.
+            4. Dates: if range, return ONLY the FIRST date.
+            5. Output JSON ONLY.
+            6. In amount don't read $ sign.
 
-LABELS:
-{missing_labels}
+            LABELS:
+            {missing_labels}
 
-MANDATORY OUTPUT FORMAT:
+            MANDATORY OUTPUT FORMAT:
 
-{{
-  "sections": [
-    {{
-      "id": "<same as input>",
-      "sectionName": "<same as input>",
-      "dataKey": "<same as input>",
-      "sectionOrder": "<same as input>",
-      "fields": [
-        {{
-          "id": "<same>",
-          "field": "<same>",
-          "label": "<same>",
-          "type": "<same>",
-          "fieldOrder": "<same>",
-          "confidence": "<same>",
-          "value": "<extracted_value_or_null>"
-        }}
-      ]
-    }}
-  ]
-}}
+            {{
+            "sections": [
+                {{
+                "id": "<same as input>",
+                "sectionName": "<same as input>",
+                "dataKey": "<same as input>",
+                "sectionOrder": "<same as input>",
+                "fields": [
+                    {{
+                    "id": "<same>",
+                    "field": "<same>",
+                    "label": "<same>",
+                    "type": "<same>",
+                    "fieldOrder": "<same>",
+                    "confidence": "<same>",
+                    "value": "<extracted_value_or_null>"
+                    }}
+                ]
+                }}
+            ]
+            }}
 
-raw_text:
-{raw_text_chunk}
-""".format(
+            raw_text:
+            {raw_text_chunk}
+        """.format(
             missing_labels=json.dumps(missing_labels, ensure_ascii=False),
             raw_text_chunk=raw_text[:9000]
         )
@@ -575,259 +445,6 @@ raw_text:
             "error": "ai_extraction_failed",
             "details": str(e),
         }
-
-
-
-# async def extract_with_openai(raw_text: str, dynamic_keys: List[Dict[str, Any]]) -> Dict[str, Any]:
-#     """
-#     Extract structured data from raw text using dynamic_keys driven schema.
-#     """
-
-#     try:
-#         client = openai.AsyncOpenAI(api_key=OPENAI_API_KEY)
-
-#         hints = _build_extraction_hints(raw_text)
-
-#         prompt = """
-#             You are given TWO inputs.
-
-#             INPUT 1:
-#             A JSON object named `dynamic_keys`.
-#             It defines the EXACT response schema.
-#             It contains sections and fields with metadata.
-
-#             INPUT 2:
-#             Raw document text.
-
-#             AUXILIARY INPUT 3 (HINTS):
-#             A small JSON with regex-detected candidates for service line data
-#             (procedure codes, units, amounts, dates). Use these ONLY as guidance
-#             to improve recall; do not invent values.
-
-#             GOAL:
-#             Return extracted data by COPYING the structure of `dynamic_keys`
-#             and ADDING ONE key named `value` inside EACH field.
-
-#             STRICT RULES:
-
-#             1. DO NOT remove any existing keys.
-#             2. DO NOT rename any keys.
-#             3. DO NOT add new keys except `value`.
-#             4. DO NOT reorder sections or fields.
-#             5. Preserve ALL field properties:
-#             - id
-#             - field
-#             - label
-#             - type
-#             - fieldOrder
-#             - confidence
-#             6. Add `"value"` to every field.
-#             7. Extract values ONLY from text.
-#             8. If value is not found, set `"value": null`.
-#             9. In amount not read $ sign.
-
-#             LEVEL BEHAVIOR:
-#             - dynamic_keys = schema
-#             - section = grouping
-#             - field = extraction unit
-
-#                         SPECIAL INSTRUCTIONS FOR SERVICE LINE DATA:
-#                         - Sections whose names or dataKey indicate service lines (contains any of:
-#                             "service", "svc", "service line") must be populated by scanning both raw text
-#                             AND HINTS. Many documents encode service lines as rows in tables.
-#                         - Use common patterns:
-#                             • CPT: 5-digit numeric (e.g., 99213)
-#                             • HCPCS: letter + 4 digits (e.g., J1234)
-#                             • Units: integers/decimals near words like "Units", "Qty", "Quantity"
-#                             • Dates of service: mm/dd/yyyy (or similar), often a range like 10/08/2025 - 10/08/2025
-#                             • Amounts: $1,234.56 style
-#                         - Prefer a value that appears on the same line or row as the code.
-#                         - If multiple candidates exist, choose the most contextually relevant one,
-#                             prioritizing proximity and section semantics; otherwise return null.
-#                         - Do NOT add new fields; only fill the existing ones defined in dynamic_keys.
-
-#             MANDATORY OUTPUT FORMAT:
-
-#             {
-#             "sections": [
-#                 {
-#                 "id": "<same as input>",
-#                 "sectionName": "<same as input>",
-#                 "dataKey": "<same as input>",
-#                 "sectionOrder": <same as input>,
-#                 "fields": [
-#                     {
-#                     "id": "<same>",
-#                     "field": "<same>",
-#                     "label": "<same>",
-#                     "type": "<same>",
-#                     "fieldOrder": <same>,
-#                     "confidence": <same>,
-#                     "value": "<extracted_value_or_null>"
-#                     }
-#                 ]
-#                 }
-#             ]
-#             }
-
-#             NO explanations.
-#             NO markdown.
-#             ONLY valid JSON.
-
-#             dynamic_keys:
-#             """ + json.dumps(dynamic_keys, ensure_ascii=False) + """
-
-#             RAW TEXT:
-#             """ + raw_text[:6000] + """
-
-#             HINTS:
-#             """ + json.dumps(hints, ensure_ascii=False)
-
-#         response = await client.chat.completions.create(
-#             model="gpt-4o-mini",
-#             messages=[
-#                 {"role": "system", "content": "You are a strict JSON extraction engine."},
-#                 {"role": "user", "content": prompt},
-#             ],
-#             temperature=0,
-#             max_tokens=3000,
-#         )
-
-#         content = response.choices[0].message.content.strip()
-
-#         print()
-#         # print("OpenAI raw response content:=========", content)
-#         print()
-
-#         # Remove markdown if present
-#         if content.startswith("```"):
-#             content = content.split("```")[1]
-
-#         result = json.loads(content)
-
-#         # HARD GUARANTEE: every field has `value`
-#         for section in result.get("sections", []):
-#             for field in section.get("fields", []):
-#                 field.setdefault("value", None)
-#         # print("OpenAI extraction result:=========", result)
-#         return result
-
-#     except json.JSONDecodeError as e:
-#         logger.error("JSON decode failed", exc_info=True)
-#         return {
-#             "sections": [],
-#             "error": "Invalid JSON returned by AI",
-#             "details": str(e),
-#         }
-
-#     except openai.OpenAIError as e:
-#         logger.error("OpenAI API error", exc_info=True)
-#         return {
-#             "sections": [],
-#             "error": "OpenAI API error",
-#             "details": str(e),
-#         }
-
-#     except Exception as e:
-#         logger.error("Unexpected extraction error", exc_info=True)
-#         return {
-#             "sections": [],
-#             "error": "Unhandled extraction error",
-#             "details": str(e),
-#         }
-#=========================end===============================
-
-#==================================================================
-
-# def extract_with_openai(raw_text: str, dynamic_keys: List[Dict[str, Any]]) -> Dict[str, Any]:
-#     """
-#     Extract structured data from raw text using dynamic_keys driven schema.
-#     FINAL OUTPUT SHAPE = dynamic_keys-like, repeated per claim
-#     """
-
-#     try:
-#         client = openai.OpenAI(api_key=OPENAI_API_KEY)
-
-#         # 1️⃣ Split raw text into claim segments
-#         segments = _split_claims(raw_text)
-
-#         claims: List[Dict[str, Any]] = []
-
-#         for seg_text in segments:
-#             seg_hints = _build_extraction_hints(seg_text)
-
-#             prompt = """
-# You are given TWO inputs.
-
-# INPUT 1:
-# A JSON object named `dynamic_keys`.
-# It defines the EXACT response schema.
-
-# INPUT 2:
-# Raw document text (ONE claim only).
-
-# RULES:
-# 1. Copy dynamic_keys EXACTLY.
-# 2. Do NOT remove, rename, reorder keys.
-# 3. Add ONLY `value` inside each field.
-# 4. Extract values ONLY from raw text.
-# 5. If value missing → null.
-
-# OUTPUT FORMAT (ONLY THIS):
-
-# {
-#   "sections": [ ...dynamic_keys with values... ]
-# }
-
-# NO explanations.
-# ONLY valid JSON.
-# dynamic_keys:
-# """ + json.dumps(dynamic_keys, ensure_ascii=False) + """
-
-# RAW TEXT:
-# """ + seg_text[:3500] + """
-
-# HINTS:
-# """ + json.dumps(seg_hints, ensure_ascii=False)
-
-#             response = client.chat.completions.create(
-#                 model="gpt-4o-mini",
-#                 messages=[
-#                     {"role": "system", "content": "You are a strict JSON extraction engine."},
-#                     {"role": "user", "content": prompt},
-#                 ],
-#                 temperature=0,
-#                 response_format={"type": "json_object"},
-#                 max_tokens=2000,
-#             )
-
-#             content = response.choices[0].message.content.strip()
-#             payload = _sanitize_ai_json(content)
-#             extracted = _extract_first_json_value(payload) or payload
-
-#             try:
-#                 result = json.loads(extracted)
-#             except Exception:
-#                 result = {"sections": []}
-
-#             # 🔒 Guarantee value key
-#             for section in result.get("sections", []):
-#                 for field in section.get("fields", []):
-#                     field.setdefault("value", None)
-
-#             claims.append(result)
-
-#         # ✅ FINAL OUTPUT — dynamic_keys-like
-#         return {
-#             "claims": claims
-#         }
-
-#     except Exception as e:
-#         logger.error("Extraction failed", exc_info=True)
-#         return {
-#             "claims": [],
-#             "error": str(e),
-#         }
 
 
 def extract_with_rules(raw_text: str) -> List[Dict[str, Any]]:
