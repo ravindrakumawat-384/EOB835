@@ -147,7 +147,7 @@ async def login(payload: LoginRequest) -> Any:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials. Please check username and password. Note: Passwords longer than 72 bytes are truncated.")
 
     # Invitation link expiration logic
-    # if not user.get("is_active", True) and not user.get("last_login_at"):
+    if not user.get("is_active", True) and not user.get("last_login_at"):
         # User is invited but not yet activated
         with get_pg_conn() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
