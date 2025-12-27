@@ -162,8 +162,11 @@ async def get_users(user: Dict[str, Any] = Depends(get_current_user)):
 
 # -------------------- ADD USER --------------------
 @router.post("/")
-async def post_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
+async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
     try:
+        import uuid
+        import secrets
+        from datetime import timedelta
         user_id = user.get("id")
         with get_pg_conn() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -182,7 +185,7 @@ async def post_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_
                     raise HTTPException(status_code=404, detail="Organization not found")
                 org_name = org["name"]
 
-                # # Check if user exists
+                # Check if user exists
                 cur.execute("SELECT id FROM users WHERE email = %s LIMIT 1", (payload["email"],))
                 usr = cur.fetchone()
                 if not usr:
@@ -195,11 +198,25 @@ async def post_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_
                         (new_user_id, payload["email"], payload.get("name", ""), password, False)
                     )
                     add_user_id = new_user_id
-                    # Send invite email
+
+
+                    # Generate invite token and expiration
+                    invite_token = secrets.token_urlsafe(32)
+                    expires_at = datetime.utcnow() + timedelta(hours=24)
+                    # Store invite token and expiration in refresh_tokens table
+                    cur.execute(
+                        "INSERT INTO refresh_tokens (jti, user_id, created_at, expires_at) VALUES (%s, %s, %s, %s)",
+                        (invite_token, add_user_id, datetime.utcnow(), expires_at)
+                    )
+
+                    # Send invite email with expiration info
                     temp_pass = "changeme123"
-                    send_invite_email(payload["email"], temp_pass, payload.get("name", ""), org_name)
+                    # invite_link = f"https://your-app-url.com/invite?token={invite_token}"
+                    # email_body = f"Hello {payload.get('name', '')},\nYou have been invited to join {org_name}. Please use this link to set your password and activate your account.\n\nInvite Link: {invite_link}\nThis link will expire in 24 hours."
+                    # send_invite_email(payload["email"], temp_pass, payload.get("name", ""), org_name, email_body=email_body)
+
+                    send_invite_email(payload["email"], temp_pass, payload.get("name", ""), org_name, invite_token)
                 else:
-                    # add_user_id = usr["id"]
                     raise HTTPException(status_code=500, detail="User already exists. Please use a different email.")
                 # Insert new membership
                 cur.execute(

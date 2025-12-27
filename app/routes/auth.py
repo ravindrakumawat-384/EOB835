@@ -141,8 +141,25 @@ async def login(payload: LoginRequest) -> Any:
     print("user-----> ", user)
     if not user or not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials. Please check username and password")
-    # if not user.get("is_active", True):
-    #     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User inactive")
+
+    # Invitation link expiration logic
+    if not user.get("is_active", True) and not user.get("last_login_at"):
+        # User is invited but not yet activated
+        with get_pg_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT expires_at FROM refresh_tokens WHERE user_id = %s ORDER BY expires_at DESC LIMIT 1",
+                    (user["id"],)
+                )
+                invite_token_row = cur.fetchone()
+        if not invite_token_row:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invitation link expired or invalid. Please contact your admin for a new invite.")
+        expires_at = invite_token_row["expires_at"]
+        if expires_at < datetime.utcnow():
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invitation link has expired. Please contact your admin for a new invite.")
+        # Optionally, you can allow login if you want, or force activation flow
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Please activate your account using the invitation link sent to your email.")
+
     access = create_access_token(user["id"])
     refresh = create_refresh_token(user["id"])
     dec = decode_token(refresh)

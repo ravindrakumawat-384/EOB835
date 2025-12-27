@@ -86,7 +86,7 @@ async def send_email_stub(
 
 
 
-def send_invite_email(to_email: str, temp_pass, user_name: str, org_name: str) -> bool:
+def send_invite_email(to_email: str, temp_pass, user_name: str, org_name: str, invite_token) -> bool:
     try:
         print("Enter in SSend Invite mail function")
         msg = EmailMessage()

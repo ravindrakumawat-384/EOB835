@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from .common.db.db import init_db, db
-from .routes import auth, orgs, settings_users, settings_general, settings_audit_logs, settings_notifications, settings_profile
+from .routes import auth, orgs, settings_users, settings_general, settings_audit_logs, settings_notifications, settings_profile, eob_history, exception_queue
 from .routes import dashboard, review_listing, upload, debug, claims, debug, generate_835
 
 from app.common.config import settings
@@ -44,6 +44,8 @@ app.include_router(settings_general.router)
 app.include_router(settings_profile.router)
 app.include_router(settings_audit_logs.router)
 app.include_router(settings_notifications.router)
+app.include_router(eob_history.router)
+app.include_router(exception_queue.router)
 
 
 app.include_router(settings_audit_logs.router)
