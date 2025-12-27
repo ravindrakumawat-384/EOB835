@@ -104,14 +104,14 @@ async def patch_general_settings(payload: Dict[str, Any], user: Dict[str, Any] =
                 update_data = {}
                 rp_update_data = {}
                 update_data["name"] = payload["organization"]["name"]
-                update_data["timezone"] = payload["organization"]["timezone"]
+                # update_data["timezone"] = payload["organization"]["timezone"]
                 rp_update_data["retention_days"] = payload["retention"]["retention_days"]
 
-                if update_data:
-                    cur.execute(
-                        "UPDATE organizations SET name = %s, timezone = %s WHERE id = %s",
-                        (update_data["name"], update_data["timezone"], org_id)
-                    )
+                # if update_data:
+                #     cur.execute(
+                #         "UPDATE organizations SET name = %s, timezone = %s WHERE id = %s",
+                #         (update_data["name"], update_data["timezone"], org_id)
+                #     )
 
                 if rp_update_data:
                     cur.execute(

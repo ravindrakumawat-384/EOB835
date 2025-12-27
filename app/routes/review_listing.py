@@ -87,6 +87,10 @@ async def review_queue(
 
         if status == "pending":
             status = "pending_review"
+        elif status == "ai_process":
+            status = "ai_processing"
+        else:
+            status = status
             
         #=============Payer name================
         cur_opts1 = pg.cursor()
@@ -240,26 +244,45 @@ async def review_queue(
         for r in pg_rows:
             file_id, filename, payer_name, file_status, reviewer_id, uploaded_at = r
             extractions = extraction_map.get(file_id, [])
-            # Always show if processing_status is 'ai_processing', even if no extractions
-            if file_status in ["ai_processing", "processing_in_progress"] and not extractions:
-                table_rows.append(
-                    {
-                        "file_id": file_id,
-                        "claim_id": None,
-                        "fileName": filename,
-                        "payer": payer_name or "-",
-                        "claim_number": "-",
-                        "confidence": "0",
-                        "status": file_status,
-                        "reviewer": reviewer_id or "Unassigned",
-                        "uploaded": uploaded_at,
-                        "is_processing": file_status == "ai_processing" if True else False,
-                    }
-                )
-            # Otherwise, use extraction logic as before, but filter by status and payerName if needed
+            # Build a search string for filtering
+            search_str = f"{filename} {payer_name or ''} {file_status} {reviewer_id or ''}".lower()
+            # Handle ai_processing rows with all filters
+            if file_status == "ai_processing" and not extractions:
+                if status in ("all", "ai_processing"):
+                    # Apply search filter
+                    if search and search.lower() not in search_str:
+                        continue
+                    # Apply payer filter
+                    if payer != "all" and (not payer_name or payer.lower() not in payer_name.lower()):
+                        continue
+                    # ai_processing confidence is always 0, so filter accordingly
+                    if confidence_cat == "high":
+                        continue
+                    if confidence_cat == "medium":
+                        continue
+                    if confidence_cat == "low":
+                        pass  # 0 is < 80, so it's low
+                    table_rows.append(
+                        {
+                            "file_id": file_id,
+                            "claim_id": None,
+                            "fileName": filename,
+                            "payer": payer_name or "-",
+                            "claim_number": "-",
+                            "confidence": "0",
+                            "status": file_status,
+                            "reviewer": reviewer_id or "Unassigned",
+                            "uploaded": uploaded_at,
+                            "is_processing": True,
+                        }
+                    )
+            # Otherwise, use extraction logic as before, but filter by all filters
             for ext in extractions:
                 ext_status = ext.get("status", "")
                 ext_payer = ext.get("payerName", "")
+                ext_filename = filename or ""
+                ext_reviewer = reviewer_id or ""
+                ext_search_str = f"{ext_filename} {ext_payer} {ext_status} {ext_reviewer}".lower()
                 if status != "all" and ext_status != status:
                     continue
                 if payer != "all" and (not ext_payer or payer.lower() not in ext_payer.lower()):
@@ -272,6 +295,9 @@ async def review_queue(
                         continue
                     if confidence_cat == "low" and conf_val >= 80:
                         continue
+                # Apply search filter
+                if search and search.lower() not in ext_search_str:
+                    continue
                 claim_line_id = ext.get("_id", "")
                 reviewer_ids = ext.get("reviewerId", None)
                 claim_number = ext.get("claimNumber", "N/A")
@@ -288,12 +314,11 @@ async def review_queue(
                         "uploaded": uploaded_at,
                     }
                 )
-        
-
         # ---------------------------
         # ✅ FIXED PAGINATION (ONLY CHANGE)
         # ---------------------------
-        total_records = len(table_rows)
+        # Show only 'pending_review' count in total_records
+        total_records = sum(1 for row in table_rows if row.get('status') == 'pending_review')
 
         total_pages = (total_records + page_size - 1) // page_size
         if page > total_pages and total_pages > 0:

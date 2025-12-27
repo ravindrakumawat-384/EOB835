@@ -8,7 +8,7 @@ from ..utils.logger import get_logger
 from app.common.db.pg_db import get_pg_conn
 from app.services.s3_service import S3Service
 from app.common.config import settings
-from datetime import datetime
+from datetime import datetime, timezone
 from pymongo import ReturnDocument
 from typing import Dict, Any
 from ..services.auth_deps import get_current_user, require_role
@@ -182,6 +182,7 @@ async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: s
             return {"message": "Claim marked as exception successfully.", "status": 200}  
          
         # Handle draft case
+
         elif check == "draft" and result.get("status") != "approved" and result.get("status") != "exception":
             # Insert new version record
             await version_collection.insert_one({
@@ -189,10 +190,10 @@ async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: s
                 "extraction_id": claim_id,
                 "version": next_version,
                 "claim": claim_json,
-                "created_at": datetime.utcnow(),
+                "created_at": datetime.now(timezone.utc),
                 "updated_by": updated_by,
                 "status": "preview_pending"
-                })
+            })
             result = await version_collection.find_one(query, sort=[("created_at", 1)])
             predefined_json = result.get("claim", {})
             # ---------- apply user updates ----------
@@ -204,30 +205,31 @@ async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: s
                 {
                     "$set": {
                         "claim": updated_claim,
-                        "updated_at": datetime.utcnow()
+                        "updated_at": datetime.now(timezone.utc)
                     }
                 },
                 sort=[("created_at", 1)],   # first record (earliest)
                 return_document=ReturnDocument.AFTER
-)
+            )
 
             return {"message": "Claim updated successfully.", "status": 200}
         
+
         elif check == "confirmed" and result.get("status") != "approved" and result.get("status") != "exception":
             # Update extraction status in extraction_results collection
             await extraction_collection.update_one(
                 {"_id": claim_id},
                 {"$set": {"status": "approved"}}
             )
-          
+
             await version_collection.insert_one({
-            "file_id": file_id,
-            "extraction_id": claim_id,
-            "version": next_version,
-            "claim": claim_json,
-            "created_at": datetime.utcnow(),
-            "updated_by": updated_by,
-            "status": "approved"
+                "file_id": file_id,
+                "extraction_id": claim_id,
+                "version": next_version,
+                "claim": claim_json,
+                "created_at": datetime.now(timezone.utc),
+                "updated_by": updated_by,
+                "status": "approved"
             })
 
             await version_collection.find_one_and_update(
@@ -241,19 +243,19 @@ async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: s
             predefined_json = result.get("claim", {})
             # ---------- apply user updates ----------
             updated_claim = apply_user_updates(predefined_json, claim_json)
-            
+
             # ---------- version calculation ----------
             await version_collection.find_one_and_update(
                 {"extraction_id": claim_id},
                 {
                     "$set": {
                         "claim": updated_claim,
-                        "updated_at": datetime.utcnow()
+                        "updated_at": datetime.now(timezone.utc)
                     }
                 },
                 sort=[("created_at", 1)],   # first record (earliest)
                 return_document=ReturnDocument.AFTER
-                )
+            )
             return {"message": "Claim approved successfully.", "status": 200}
         
         

@@ -1,24 +1,37 @@
 import hashlib
 from typing import Optional
+from app.common.db.pg_db import get_pg_conn
 
 def calculate_file_hash(content: bytes) -> str:
     """Calculate MD5 hash of file content."""
     return hashlib.md5(content).hexdigest()
 
 # Dummy in-memory hash store for demonstration (replace with DB lookup)
-_uploaded_hashes = set()
+# _uploaded_hashes = set()
 _generated_hashes = set()
 
 def check_hash_exists(file_hash: str) -> bool:
     """Check if file hash exists in the uploaded files DB (replace with real DB)."""
-    return file_hash in _uploaded_hashes
+    pg = get_pg_conn()
+    cur_opts1 = pg.cursor()
+    cur_opts1.execute(
+        """
+        SELECT hash
+        FROM upload_files
+        WHERE hash = %s""",
+        (file_hash,)
+    )
+    result = cur_opts1.fetchone()
+    if result:
+        return True
+    return False
 
 def is_835_generated(file_hash: str) -> bool:
     """Check if file with this hash has already been processed as 835 (replace with real DB)."""
     return file_hash in _generated_hashes
 
 def register_uploaded_hash(file_hash: str, generated: bool = False):
-    _uploaded_hashes.add(file_hash)
+    # _uploaded_hashes.add(file_hash)
     if generated:
         _generated_hashes.add(file_hash)
 

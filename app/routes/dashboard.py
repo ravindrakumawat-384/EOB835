@@ -120,7 +120,7 @@ async def dashboard_summary(user: Dict[str, Any] = Depends(get_current_user)) ->
                 # Count documents with status in ('failed', 'need_template', 'Unreadable', 'exception')
                 exceptions = await extraction_col.count_documents({
                     "fileId": {"$in": org_file_ids},
-                    "status": {"$in": ['failed', 'need_template', 'unreadable', 'exception']}
+                    "status": {"$in": ['failed', 'unreadable', 'exception']}
                 })
             else:
                 exceptions = 0
@@ -145,7 +145,7 @@ async def dashboard_summary(user: Dict[str, Any] = Depends(get_current_user)) ->
             SELECT COUNT(*)
             FROM upload_files
             WHERE org_id = %s
-            AND processing_status IN ('failed', 'need_template', 'Unreadable', 'exception')
+            AND processing_status IN ('failed','Unreadable', 'exception')
         """, (org_id,))
         pg_exceptions = cur.fetchone()[0]
 
@@ -300,7 +300,7 @@ async def dashboard_summary(user: Dict[str, Any] = Depends(get_current_user)) ->
                 "pendingReview": pending_review + pg_pending_review,
                 "accuracyPercent": mongo_accuracy_percent,
                 "exceptions": exceptions + pg_exceptions,
-                "needsTemplate": needs_template,
+                "needsTemplate": pg_needs_template,
             },
             "recentUploadsData": {
                 "total_records": 0,
