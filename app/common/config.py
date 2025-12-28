@@ -9,7 +9,7 @@ load_dotenv()
 
 
 class Settings(BaseSettings):
-    MONGO_URI: str = "mongodb://@127.0.0.1:27017/?directConnection=true&serverSelectionTimeoutMS=2000&authSource=eob&appName=mongosh+2.5.8"
+    MONGO_URI: str = "mongodb://localhost:27017"
     MONGO_DB: str = "eob"
     APP_NAME: str = "EOB-835"
 
