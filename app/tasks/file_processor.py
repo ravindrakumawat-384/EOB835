@@ -17,20 +17,42 @@ import re
 from typing import List
 from app.services.mongo_extraction import store_extraction_result
 
+import json
+import time
+from app.common.db.redis_db import get_redis_client
+
 logger = get_logger(__name__)
 DB = init_db()
+
+# Redis Key Constants
+PROCESSING_JOB_IDS = "processing_job_ids"
+JOB_STATE_PREFIX = "job_state:"
+MAX_RETRIES = 3
+RETRY_DELAY = 300  # 5 minutes in seconds
+JOB_TIMEOUT = 600  # 10 minutes in seconds
 
 async def process_single_file_async(file_record):
     """
     Async logic for processing a single file.
     """
     file_id, org_id, storage_path, filename, status, uploaded_at, uploaded_by = file_record
+    redis_client = get_redis_client()
+    job_key = f"{JOB_STATE_PREFIX}{file_id}"
     
     # Initialize MongoDB client locally for this task
     client = AsyncIOMotorClient(settings.MONGO_URI)
     db = client[settings.MONGO_DB]
     
     try:
+        # Update state to RUNNING
+        state = json.loads(redis_client.get(job_key) or "{}")
+        state.update({
+            "status": "RUNNING",
+            "last_run": time.time(),
+            "retry_count": state.get("retry_count", 0)
+        })
+        redis_client.set(job_key, json.dumps(state))
+
         # Initialize S3 service
         s3_service = S3Service(
             settings.S3_BUCKET,
@@ -48,10 +70,8 @@ async def process_single_file_async(file_record):
         
         # Extract text
         raw_text = extract_text_from_file(file_content, filename, mime_type)
-        # print(f'📝 Extracted text length: {raw_text} characters')
         if not raw_text or len(raw_text.strip()) < 50:
             logger.error(f"File {filename} appears unreadable")
-            print(f"❌ Text extraction failed - insufficient content")
             mark_processing_failed(file_id, "Insufficient text content", "text_extraction")
             return False
 
@@ -65,19 +85,14 @@ async def process_single_file_async(file_record):
 
         # Match payer
         matched_payer_name = ''
-        print(f"🔍 Matching payer from {len(payer_names)} available payers...")
         for p_name in payer_names:
             if p_name and p_name.lower() in raw_text.lower():
                 matched_payer_name = p_name
                 break
 
         if not matched_payer_name:
-            logger.warning(f"No payer matched for file {file_id}")
-            print(f"⚠️  No payer matched - marking as need_template")
             update_file_status(file_id, 'need_template')
             return False
-
-        print(f"✓ Matched payer: {matched_payer_name}")
 
         # Get template for payer
         pg = get_pg_conn()
@@ -92,11 +107,7 @@ async def process_single_file_async(file_record):
         
         payer_id = payer_row[0]
         cur.execute(
-            """
-            UPDATE upload_files
-            SET detected_payer_id = %s
-            WHERE id = %s
-            """,
+            "UPDATE upload_files SET detected_payer_id = %s WHERE id = %s",
             (payer_id, file_id)
         )
         pg.commit()
@@ -165,67 +176,31 @@ async def process_single_file_async(file_record):
 
         # Split into claim blocks
         def split_claim_blocks(text: str) -> List[str]:
-            """
-            ROOT FIX: Split text into individual claim blocks with ONLY payment header.
-
-            Problem: Old logic included first claim in "header", polluting all blocks with
-            multiple claim numbers. AI would then extract the first claim number from every block.
-
-            Solution:
-            1. Find position of first claim in document
-            2. Extract TRUE header (only payment/payer info before first claim)
-            3. Split remaining text by PatientName or ClaimNumber patterns
-            4. Append TRUE header (without any claim data) to each claim block
-
-            This ensures each block contains EXACTLY ONE claim, not all claims.
-            """
-            # Find the position of the first claim (first occurrence of ClaimNumber/Claim Number)
             first_claim_match = re.search(r'(?:ClaimNumber|Claim Number)[\s:]*[A-Z]?\d{8,}', text, re.IGNORECASE)
-
             if not first_claim_match:
-                # No claims found, return whole text
                 return [text.strip()] if len(text.strip()) > 50 else []
 
             first_claim_pos = first_claim_match.start()
-
-            # Find the start of that claim by looking backwards for PatientName
             header_end = text.rfind('PatientName', 0, first_claim_pos)
             if header_end == -1:
                 header_end = text.rfind('Patient Name', 0, first_claim_pos)
             if header_end == -1:
-                # Couldn't find PatientName before ClaimNumber, use position right before claim
                 header_end = first_claim_pos
 
-            # Extract TRUE header (everything before first claim - only payment/payer info)
             true_header = text[:header_end].strip()
-
-            # Split remaining text by PatientName patterns
             remaining_text = text[header_end:]
-
-            # Try multiple splitting patterns for different PDF formats
             claim_pattern = r'(?=PatientName[\s:]+[A-Z])'
             claim_blocks = re.split(claim_pattern, remaining_text, flags=re.IGNORECASE)
-
-            # If PatientName split didn't work, try Patient Name with space
             if len(claim_blocks) <= 1:
                 claim_pattern = r'(?=Patient Name[\s:]+[A-Z])'
                 claim_blocks = re.split(claim_pattern, remaining_text, flags=re.IGNORECASE)
 
-            # Filter valid claim blocks (must have reasonable content)
             valid_claims = [b.strip() for b in claim_blocks if len(b.strip()) > 50]
-
-            # Append TRUE header (payment info only) to each claim
             if true_header and len(true_header) > 20:
-                processed = []
-                for claim in valid_claims:
-                    processed.append(true_header + "\n" + ("-" * 20) + "\n" + claim)
-                return processed
-            else:
-                # No header found, return claims as-is
-                return valid_claims
+                return [true_header + "\n" + ("-" * 20) + "\n" + claim for claim in valid_claims]
+            return valid_claims
 
         claim_blocks = split_claim_blocks(raw_text)
-        print(f"📄 Split into {len(claim_blocks)} claim block(s)")
 
         # AI Extraction
         sem = asyncio.Semaphore(3)
@@ -234,10 +209,8 @@ async def process_single_file_async(file_record):
                 await asyncio.sleep(0.5)
                 return await ai_extract_claims(block, dynamic_key)
 
-        print(f"🤖 Starting AI extraction for {len(claim_blocks)} block(s)...")
         tasks = [extract_with_sem(block) for block in claim_blocks]
         claims = await asyncio.gather(*tasks)
-        print(f"✓ AI extraction completed")
 
         # Process and store results
         stored_count = 0
@@ -245,10 +218,7 @@ async def process_single_file_async(file_record):
         skipped_empty = 0
 
         for idx, ai_result in enumerate(claims, 1):
-            # Store in MongoDB (async)
             await store_extraction_result(db, file_id, ai_result, matched_payer_name, uploaded_by)
-
-            # Flatten and store in Postgres (sync)
             flat_claims = flatten_claims2(ai_result)
 
             if flat_claims:
@@ -287,25 +257,34 @@ async def process_single_file_async(file_record):
 
         # Update status
         update_file_status(file_id, "pending_review", payer_id)
+        
+        # SUCCESS: Remove from Redis
+        redis_client.srem(PROCESSING_JOB_IDS, file_id)
+        redis_client.delete(job_key)
         return True
         
     except Exception as file_error:
         logger.error(f"Error processing file {file_id}: {file_error}", exc_info=True)
         mark_processing_failed(file_id, str(file_error), "processing_error")
+        
+        # FAILURE: Update state to FAILED, keep in processing_job_ids
+        state = json.loads(redis_client.get(job_key) or "{}")
+        state.update({
+            "status": "FAILED",
+            "error": str(file_error),
+            "retry_count": state.get("retry_count", 0) + 1
+        })
+        redis_client.set(job_key, json.dumps(state))
         return False
     finally:
         client.close()
 
 @celery_app.task(name='app.tasks.file_processor.process_pending_files')
 def process_pending_files():
-    print("\n" + "=" * 80)
-    print("🔄 CELERY PERIODIC TASK STARTED - Processing pending files")
-    print("=" * 80)
+    logger.info("CELERY PERIODIC TASK STARTED - Processing pending files")
+    redis_client = get_redis_client()
+    
     try:
-        logger.info("=" * 60)
-        logger.info("CELERY PERIODIC TASK STARTED - Processing pending files")
-        logger.info("=" * 60)
-
         # Connect to database
         conn = get_pg_conn()
         cur = conn.cursor()
@@ -316,55 +295,67 @@ def process_pending_files():
             FROM upload_files
             WHERE processing_status IN ('ai_processing')
             ORDER BY uploaded_at ASC
-            LIMIT 10
+            LIMIT 20
         """)
-
         files = cur.fetchall()
-
-        if not files:
-            print("ℹ️  No pending files found to process")
-            logger.info("No pending files found to process")
-            cur.close()
-            conn.close()
-            return {'status': 'no_files'}
-
-        print(f"\n📂 Found {len(files)} file(s) to process:")
-        for idx, f in enumerate(files, 1):
-            print(f"   {idx}. File ID: {f[0]}, Filename: {f[3]}, Status: {f[4]}")
-
         cur.close()
         conn.close()
 
-        print(f"\n🔒 Locked {len(files)} file(s) for processing")
-        logger.info(f"Locked {len(files)} file(s) for processing")
-        
-        # Process each file
-        processed_count = 0
-        for idx, file_record in enumerate(files, 1):
-            file_id, org_id, storage_path, filename, status, uploaded_at, uploaded_by = file_record
-            print(f"\n{'='*80}")
-            print(f"📄 Processing file {idx}/{len(files)}")
-            print(f"   File ID: {file_id}")
-            print(f"   Filename: {filename}")
-            print(f"   Org ID: {org_id}")
-            print(f"   Storage Path: {storage_path}")
-            print(f"{'='*80}")
+        if not files:
+            return {'status': 'no_files'}
 
-            # Use asyncio.run for each file to ensure fresh event loop
+        processed_count = 0
+        for file_record in files:
+            file_id = file_record[0]
+            job_key = f"{JOB_STATE_PREFIX}{file_id}"
+            
+            # ATOMIC CHECK & ADD
+            is_new = redis_client.sadd(PROCESSING_JOB_IDS, file_id)
+            
+            if not is_new:
+                # Job already in Redis, check state
+                state_raw = redis_client.get(job_key)
+                if not state_raw:
+                    # Inconsistent state, re-add state
+                    redis_client.set(job_key, json.dumps({"status": "RUNNING", "last_run": time.time(), "retry_count": 0}))
+                    continue
+                
+                state = json.loads(state_raw)
+                
+                # Check for CRASH (Timeout)
+                if state.get("status") == "RUNNING":
+                    if time.time() - state.get("last_run", 0) > JOB_TIMEOUT:
+                        logger.warning(f"Job {file_id} timed out. Retrying...")
+                    else:
+                        logger.info(f"Job {file_id} is already running. Skipping.")
+                        continue
+                
+                # Check for RETRY
+                elif state.get("status") == "FAILED":
+                    if state.get("retry_count", 0) >= MAX_RETRIES:
+                        logger.error(f"Job {file_id} reached max retries. Skipping.")
+                        continue
+                    
+                    if time.time() - state.get("last_run", 0) < RETRY_DELAY:
+                        logger.info(f"Job {file_id} failed recently. Waiting for backoff.")
+                        continue
+                    
+                    logger.info(f"Retrying failed job {file_id} (Attempt {state.get('retry_count') + 1})")
+                
+                else:
+                    continue
+
+            else:
+                # New job, initialize state
+                redis_client.set(job_key, json.dumps({"status": "RUNNING", "last_run": time.time(), "retry_count": 0}))
+
+            # Process the file
             success = asyncio.run(process_single_file_async(file_record))
             if success:
                 processed_count += 1
-                print(f"✅ Successfully processed: {filename}")
-            else:
-                print(f"❌ Failed to process: {filename}")
 
-        print(f"\n{'='*80}")
-        print(f"🎯 TASK COMPLETED: Processed {processed_count}/{len(files)} file(s)")
-        print(f"{'='*80}\n")
-        logger.info(f"Processed {processed_count} file(s)")
         return {'status': 'success', 'processed': processed_count}
 
     except Exception as e:
-        print(f"\n❌ ERROR in periodic task: {e}")
         logger.error(f"Error in periodic task: {e}", exc_info=True)
         return {'status': 'error', 'error': str(e)}
