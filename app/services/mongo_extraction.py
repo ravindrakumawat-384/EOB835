@@ -35,7 +35,7 @@ async def store_extraction_result(db, file_id: str, ai_result: Dict[str, Any], p
             "fileId": file_id,
             "rawExtracted": "raw_text",
             "claim": flat_claims.get("section") if isinstance(flat_claims, dict) else "",
-            "aiConfidence": 95,
+            "aiConfidence": flat_claims.get("aiConfidence", 0) if isinstance(flat_claims, dict) else 0,
             "extractionStatus": "success",
             "payerName": payer_name,
             "claimNumber": flat_claims.get("claim_number") if isinstance(flat_claims, dict) else 0,

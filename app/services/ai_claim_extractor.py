@@ -219,49 +219,56 @@ async def extract_with_openai(
 
         # ---------- PASS 1 ----------
         base_prompt = f"""
-            You are a STRICT data extractor.
+            You are an AI CONFIDENCE CALCULATOR AND ENFORCER.
+            Extract data from raw_text based on dynamic_keys and generate dynamic confidence scores.
 
-            RULES:
-            1. dynamic_keys DEFINES THE SCHEMA.
-            2. COPY structure EXACTLY.
-            3. Add ONLY one key: "value".
-            4. Extract ONLY from raw_text.
-            5. If value not found, set null.
-            6. DO NOT guess.
-            7. Dates: if range, return ONLY the FIRST date.
+            CONFIDENCE SCORING RULES (MANDATORY):
+            For EACH FIELD, calculate confidence (1-100) using ONLY these signals:
+            - Exact label match vs partial match
+            - Value presence in raw text
+            - Value clarity (no truncation, no OCR noise)
+            - Position consistency (near expected label)
 
-            EXTRACTION STRATEGY:
-            - For each field, locate its LABEL followed by ":".
-            - Extract the value immediately after the label.
-            - Stop at the next label or line break.
-            - If label exists, value MUST be extracted.
+            SCORING GUIDE:
+            - 1-40: Inferred, partially matched, or noisy OCR.
+            - 41-80: Found but with minor ambiguity or slight positional deviation.
+            - 81-100: Exact match, clean extraction, strong positional alignment.
+
+            DOCUMENT-LEVEL aiConfidence:
+            - Compute as a WEIGHTED AGGREGATE of field-level confidence.
+            - Critical fields (claim number, payment amount, dates) carry higher weight.
+            - Output ONE final aiConfidence integer (1–100).
+
+            STRICT RULES:
+            1. dynamic_keys DEFINES THE SCHEMA. COPY structure EXACTLY.
+            2. Add "value" and "confidence" (dynamic score) to each field.
+            3. Extract ONLY from raw_text. If not found, set value to null and confidence to 0.
+            4. DO NOT use static or default confidence values.
+            5. Output MUST be deterministic and justifiable.
 
             MANDATORY OUTPUT FORMAT:
-
             {{
-            "sections": [
+              "sections": [
                 {{
-                "id": "<same as input>",
-                "sectionName": "<same as input>",
-                "dataKey": "<same as input>",
-                "sectionOrder": <same as input>,
-                "fields": [
+                  "id": "<id>",
+                  "sectionName": "<name>",
+                  "dataKey": "<key>",
+                  "sectionOrder": <order>,
+                  "fields": [
                     {{
-                    "id": "<same>",
-                    "field": "<same>",
-                    "label": "<same>",
-                    "type": "<same>",
-                    "fieldOrder": <same>,
-                    "confidence": <same>,
-                    "value": "<extracted_value_or_null>"
+                      "id": "<id>",
+                      "field": "<field>",
+                      "label": "<label>",
+                      "type": "<type>",
+                      "fieldOrder": <order>,
+                      "value": "<extracted_value_or_null>",
+                      "confidence": <dynamic_score_1_to_100>
                     }}
-                ]
+                  ]
                 }}
-            ]
+              ],
+              "aiConfidence": <aggregated_document_score_1_to_100>
             }}
-
-            OUTPUT:
-            VALID JSON ONLY. NO TEXT.
 
             dynamic_keys:
             {json.dumps(dynamic_keys, ensure_ascii=False)}
@@ -276,13 +283,13 @@ async def extract_with_openai(
         for attempt in range(3):
             try:
                 response = await client.chat.completions.create(
-                    model="gpt-4-turbo",  # Using GPT-4 Turbo for maximum accuracy
+                    model="gpt-4-turbo",
                     messages=[
-                        {"role": "system", "content": "You output strict JSON only."},
+                        {"role": "system", "content": "You are a strict data extractor and confidence evaluator. Output JSON ONLY."},
                         {"role": "user", "content": base_prompt},
                     ],
                     temperature=0,
-                    max_tokens=4096,  # Increased for better extraction
+                    max_tokens=4096,
                 )
                 break
             except Exception as e:
@@ -543,18 +550,16 @@ def flatten_claims2(data: dict) -> dict:
         except Exception:
             return 0
 
+    # Capture top-level aiConfidence
+    result["aiConfidence"] = data.get("aiConfidence", 0)
+
     # iterate all sections → all fields
     for section in data.get("sections", []):
         for field in section.get("fields", []):
 
             field_name = field.get("field")
             value = field.get("value")
-            confidence = field.get("confidence")
-
-            print()
-            print("field_name===========:", field_name)
-            print("value===========:", value)
-            print()
+            confidence = field.get("confidence", 0)
 
             if field_name == "payer" or field_name == "payer_name":
                 result["payer_name"] = value
@@ -586,11 +591,6 @@ def flatten_claims2(data: dict) -> dict:
             elif field_name == "payment":
                 result["payment"] = _parse_int(value)
 
-
-
-            elif field_name == "claim_payment":
-                result["claim_payment"] = _parse_int(value)
-            
             elif field_name == "total_paid":
                 result["total_paid"] = _parse_int(value)
 
@@ -603,14 +603,8 @@ def flatten_claims2(data: dict) -> dict:
             elif field_name == "dates_of_service":
                 result["dates_of_service"] = value
 
-            elif field_name == "claim_payment":
-                result["claim_confidence"] = str(int(confidence))
-
             elif field_name == "procedure_code":
                 result["procedure_code"] = value
-
-            elif field_name == "dates_of_service":
-                result["dates_of_service"] = value
             
             elif field_name == "units":
                 result["units"] = _parse_int(value)
@@ -618,12 +612,10 @@ def flatten_claims2(data: dict) -> dict:
             elif field_name == "patient_id":
                 result["patient_id"] = value
 
+            # Store field-level confidence if needed (optional based on requirements)
+            # result[f"{field_name}_confidence"] = confidence
 
-            result["overall_confidence"] = ""
-            result["payer_confidence"] = ""
-            result["claim_confidence"] = ""
-            result["section"] =  data 
-
+    result["section"] = data 
     return result
 
 
