@@ -144,10 +144,12 @@ async def login(payload: LoginRequest) -> Any:
     # Truncate password to 72 bytes for bcrypt compatibility
     password = payload.password.encode("utf-8")[:72].decode("utf-8", errors="ignore")
     if not user or not verify_password(password, user["password_hash"]):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials. Please check username and password. Note: Passwords longer than 72 bytes are truncated.")
+        print("111")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials. Please check email and password.")
 
     # Invitation link expiration logic
     if not user.get("is_active", True) and not user.get("last_login_at"):
+        print("222")
         # User is invited but not yet activated
         with get_pg_conn() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -155,7 +157,9 @@ async def login(payload: LoginRequest) -> Any:
                     "SELECT expires_at FROM refresh_tokens WHERE user_id = %s ORDER BY expires_at DESC LIMIT 1",
                     (user["id"],)
                 )
+                print("333 user[id]-----> ", user["id"])
                 invite_token_row = cur.fetchone()
+                print("444 invite_token_row-----> ", invite_token_row)
         if not invite_token_row:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invitation link expired or invalid. Please contact your admin for a new invite.")
         expires_at = invite_token_row["expires_at"]
@@ -285,9 +289,6 @@ async def request_password_reset(payload: RequestResetRequest) -> Any:
     print("user[id]", user["id"])
     token = create_reset_token(user["id"], payload.email)
 
-    # print("token GeneRateddddd ---> ", token)
-    
-    # logger.info(f"Reset Token generated: {token}")
     # logger.info(f"Reset Token generated: {token.get("jti")}")
     print()
     print("token token token token ---> ", token)
