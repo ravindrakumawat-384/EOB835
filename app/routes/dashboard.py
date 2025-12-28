@@ -145,7 +145,7 @@ async def dashboard_summary(user: Dict[str, Any] = Depends(get_current_user)) ->
             SELECT COUNT(*)
             FROM upload_files
             WHERE org_id = %s
-            AND processing_status IN ('failed','Unreadable', 'exception')
+            AND processing_status IN ('failed','Unreadable', 'exception', 'need_template')
         """, (org_id,))
         pg_exceptions = cur.fetchone()[0]
 
@@ -296,11 +296,12 @@ async def dashboard_summary(user: Dict[str, Any] = Depends(get_current_user)) ->
             "success": "Data retrieved successfully.",
             "widgets": {
                 "uploaded": uploaded + pg_uploaded,
-                "processed": count_processed,
+                # "processed": count_processed,
                 "pendingReview": pending_review + pg_pending_review,
                 "accuracyPercent": mongo_accuracy_percent,
-                "exceptions": exceptions + pg_exceptions,
-                "needsTemplate": pg_needs_template,
+                # "exceptions": exceptions + pg_exceptions,
+                "exceptions": pg_exceptions,
+                # "needsTemplate": pg_needs_template,
             },
             "recentUploadsData": {
                 "total_records": 0,
