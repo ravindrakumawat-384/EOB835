@@ -95,7 +95,7 @@ def send_invite_email(to_email: str, temp_pass, user_name: str, org_name: str, i
         msg["To"] = to_email
 
         frontend = settings.FRONTEND_URL or ""
-        login_url = f"{frontend.rstrip('/')}" + f"/auth/login"
+        login_url = f"{frontend.rstrip('/')}" + f"/auth/login/?invite_token={invite_token}"
 
         msg.add_alternative(
             f"""

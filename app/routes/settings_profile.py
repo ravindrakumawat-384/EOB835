@@ -54,8 +54,8 @@ async def get_user_profile(user: Dict[str, Any] = Depends(get_current_user)):
     - Personal Information (first name, last name, email, phone)
     - Organization
     - Location
-    - Timezone
-    - Date Format
+    # - Timezone
+    # - Date Format
     """
     try:
         # user_id = "7dd718f4-b3fb-4167-bb6c-0f8facc3f775" # grv
@@ -94,8 +94,8 @@ async def get_user_profile(user: Dict[str, Any] = Depends(get_current_user)):
                 "phone": user_prof_data.get("mobile", "N/A") if user_prof_data else "N/A",
                 "organization": org_name,
                 "location": user_prof_data.get("location", "N/A") if user_prof_data else "N/A",
-                "timezone": user_prof_data.get("timezone", "pt") if user_prof_data else "pt",
-                "dateFormat": user_prof_data.get("date_format", "MM/DD/YYYY") if user_prof_data else "MM/DD/YYYY"
+                # "timezone": user_prof_data.get("timezone", "pt") if user_prof_data else "pt",
+                # "dateFormat": user_prof_data.get("date_format", "MM/DD/YYYY") if user_prof_data else "MM/DD/YYYY"
             },
             "profileDetails": {
                 "email": user_data.get("email", ""),
@@ -127,7 +127,28 @@ async def update_user_profile(payload: Dict[str, Any], user: Dict[str, Any] = De
     print("payload-------------- :", payload)
     try:
         print("payload   update_user_profile:", payload)
-
+        print("Updating user profile...")
+        print("Updating user profile...")
+        print("Updating user profile...")
+        print("Updating user profile...")
+        print("Updating user profile...")
+        print("Updating user profile...")
+        print("Updating user profile...")
+        print("Updating user profile...")
+        print("Updating user profile...")
+        print("Updating user profile...")
+        print("Updating user profile...")
+        print("Updating user profile...")
+        print("Updating user profile...")
+        print("Updating user profile...")
+        print("Updating user profile...")
+        print("Updating user profile...")
+        print("Updating user profile...")
+        print("Updating user profile...")
+        print("Updating user profile...")
+        print("Updating user profile...")
+        print("Updating user profile...")
+        print("Updating user profile...")
         # user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
         user_id = user.get("id")
         print("User ID:", user_id)
@@ -141,19 +162,19 @@ async def update_user_profile(payload: Dict[str, Any], user: Dict[str, Any] = De
                     cur.execute("UPDATE user_profiles SET mobile = %s WHERE user_id = %s", (payload["phone"], user_id))
                 if "location" in payload:
                     cur.execute("UPDATE user_profiles SET location = %s WHERE user_id = %s", (payload["location"], user_id))
-                if "timezone" in payload:
-                    cur.execute("UPDATE user_profiles SET timezone = %s WHERE user_id = %s", (payload["timezone"], user_id))
-                if "dateFormat" in payload:
-                    cur.execute("UPDATE user_profiles SET date_format = %s WHERE user_id = %s", (payload["dateFormat"], user_id))
-                # Update organization name if provided
+                # if "timezone" in payload:
+                    # cur.execute("UPDATE user_profiles SET timezone = %s WHERE user_id = %s", (payload["timezone"], user_id))
+                # if "dateFormat" in payload:
+                    # cur.execute("UPDATE user_profiles SET date_format = %s WHERE user_id = %s", (payload["dateFormat"], user_id))
+
                 if "organization" in payload:
                     cur.execute("SELECT org_id FROM organization_memberships WHERE user_id = %s LIMIT 1", (user_id,))
                     membership = cur.fetchone()
                     if membership:
                         cur.execute("UPDATE organizations SET name = %s WHERE id = %s", (payload["organization"], membership[0]))
                 conn.commit()
-        logger.info(f"User profile updated successfully for user_id: {user_id}")
-        return {"success": "User profile updated successfully"}
+        logger.info(f"successfullysuccessfullysuccessfullysuccessfully: {user_id}")
+        return {"success": "successfullysuccessfullysuccessfullysuccessfullysuccessfully"}
         
     except HTTPException:
         raise

@@ -53,6 +53,7 @@ class UserItem(BaseModel):
     email: str
     role: str
     status: str
+    is_logged: bool
 
 
 class TeamMembersTableData(BaseModel):
@@ -78,20 +79,33 @@ async def serialize_usr(doc: dict) -> UserItem:
         return None
     with get_pg_conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            cur.execute("SELECT id, full_name, email, is_active FROM users WHERE id = %s LIMIT 1", (doc["user_id"],))
+            cur.execute("SELECT id, full_name, email, is_active, last_login_at FROM users WHERE id = %s LIMIT 1", (doc["user_id"],))
             user = cur.fetchone()
             logger.info(f"Fetched user for user_id: {user}")
             status = "active" if user and user.get("is_active") else "inactive"
+            
+            print()
+            print()
+            last_login_at=user.get("last_login_at")
+            print("last_login_at---> ", last_login_at)
+            print("last_login_at---> ", last_login_at)
+            is_logged = False if not last_login_at else True
+            print("is_logged---> ", is_logged)
+            print("is_logged---> ", is_logged)
+            print()
+            print()
             return UserItem(
                 id=user["id"] if user else doc["user_id"],
                 name=user["full_name"] if user else "",
                 email=user["email"] if user else "",
                 role=doc.get("role"),
                 status=status,
+                is_logged=is_logged
+
             )
 
 
-# -------------------- GET USERS --------------------
+# -------------------- GET USERS -----------------
 @router.get("/", response_model=UsersResponse, )
 async def get_users(user: Dict[str, Any] = Depends(get_current_user)):
     try:
@@ -107,8 +121,13 @@ async def get_users(user: Dict[str, Any] = Depends(get_current_user)):
                 # Get all memberships for org
                 cur.execute("SELECT user_id, role FROM organization_memberships WHERE org_id = %s", (org_id,))
                 members = cur.fetchall()
-                # Serialize all members
-                all_users = [await serialize_usr(doc) for doc in members]
+                # Exclude the current user from members
+                all_users = [await serialize_usr(doc) for doc in members if doc["user_id"] != user_id]
+                
+                print()
+                print("all_users-----> ", all_users)
+                print()
+
         table_headers = [
             {"field": "name", "label": "Name"},
             {"field": "email", "label": "Email"},
@@ -202,7 +221,7 @@ async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(ge
 
                     # Generate invite token and expiration
                     invite_token = secrets.token_urlsafe(32)
-                    expires_at = datetime.utcnow() + timedelta(hours=24)
+                    expires_at = datetime.utcnow() + timedelta(minutes=10)
                     # Store invite token and expiration in refresh_tokens table
                     cur.execute(
                         "INSERT INTO refresh_tokens (jti, user_id, created_at, expires_at) VALUES (%s, %s, %s, %s)",
@@ -224,12 +243,21 @@ async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(ge
                     (org_id, add_user_id, payload["role"], datetime.utcnow())
                 )
                 member_id = cur.fetchone()["id"]
+
+                # Fetch last_login_at for the new user
+                cur.execute("SELECT last_login_at FROM users WHERE id = %s LIMIT 1", (add_user_id,))
+                user_row = cur.fetchone()
+                last_login_at = user_row["last_login_at"] if user_row else None
+                
                 conn.commit()
-        logger.info(f"Created team member: {member_id}")
-        return {"message": "User added successfully", "member": member_id}
+            logger.info(f"Created team member: {member_id}")
+            is_logged = False if not last_login_at else True
+            
+
+            return {"message": "User added successfully", "is_logged": is_logged}
     except Exception as e:
         logger.error(f"Failed to create team member: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create team member. Ooooooooo liluu mt ro ree..")
+        raise HTTPException(status_code=500, detail="Failed to create team member.")
 
 
 # -------------------- UPDATE USER --------------------
