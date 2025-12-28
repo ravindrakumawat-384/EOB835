@@ -10,6 +10,12 @@ load_dotenv()
 
 
 class Settings(BaseSettings):
+    # Extra fields to match .env and environment variables (must be uppercase for Pydantic v2)
+    OPENAI_MODEL: Optional[str] = None
+    OPENAI_TEMPERATURE: Optional[float] = None
+    OPENAI_MAX_TOKENS: Optional[int] = None
+    MONGODB_URL: Optional[str] = None
+    POSTGRES_URL: Optional[str] = None
     MONGO_URI: str = "mongodb://localhost:27017"
     MONGO_DB: str = "eob_db_test"
     APP_NAME: str = "EOB-835"
