@@ -41,7 +41,7 @@ def serialize_org(doc: dict) -> dict:
 #     return {"count": len(docs), "items": docs}
 
 
-@router.get("/")
+@router.get("")
 async def list_orgs():
     """
     Return all organizations in clean JSON format.
