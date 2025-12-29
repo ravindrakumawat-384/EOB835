@@ -99,7 +99,7 @@ async def serialize_usr(doc: dict) -> UserItem:
 
 
 # -------------------- GET USERS -----------------
-@router.get("/", response_model=UsersResponse, )
+@router.get("", response_model=UsersResponse, )
 async def get_users(user: Dict[str, Any] = Depends(get_current_user)):
     try:
         user_id = user.get("id")
@@ -173,7 +173,7 @@ async def get_users(user: Dict[str, Any] = Depends(get_current_user)):
 
 
 # -------------------- ADD USER --------------------
-@router.post("/")
+@router.post("")
 async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
     try:
         import uuid
@@ -256,7 +256,7 @@ async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(ge
 
 
 # -------------------- UPDATE USER --------------------
-@router.patch("/", dependencies=[Depends(require_role(["Admin"]))])
+@router.patch("", dependencies=[Depends(require_role(["Admin"]))])
 async def patch_user(payload: Dict[str, Any]):
     try:
         member_id = payload.get("userId")
@@ -278,7 +278,7 @@ async def patch_user(payload: Dict[str, Any]):
 
 
 # -------------------- DELETE USER --------------------
-@router.delete("/{member_id}")
+@router.delete("{member_id}")
 async def del_user(member_id: str, user: Dict[str, Any] = Depends(get_current_user)):
     try:
         user_id = user.get("id")
