@@ -5,7 +5,8 @@ from celery.schedules import crontab
 celery_app = Celery(
     'eob_processor',
     broker='redis://localhost:6379/0',
-    backend='redis://localhost:6379/0'
+    backend='redis://localhost:6379/0',
+    include=['app.tasks.file_processor']
 )
 
 # Celery configuration
