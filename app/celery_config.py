@@ -5,7 +5,8 @@ from celery.schedules import crontab
 celery_app = Celery(
     'eob_processor',
     broker='redis://localhost:6379/0',
-    backend='redis://localhost:6379/0'
+    backend='redis://localhost:6379/0',
+    include=['app.tasks.file_processor']
 )
 
 # Celery configuration
@@ -18,9 +19,9 @@ celery_app.conf.update(
     
     # Beat schedule - runs every 5 minutes
     beat_schedule={
-        'process-pending-files-every-5-minutes': {
+        'process-pending-files-every-1-minute': {
             'task': 'app.tasks.file_processor.process_pending_files',
-            'schedule': 180.0,  # Every 5 minutes (in seconds)
+            'schedule': 60.0,  # Every 1 minute (in seconds)
         },
     },
 )

@@ -84,7 +84,8 @@ async def review_queue(
     try:
         pg = get_pg_conn()
 
-
+        user_id = user.get("id")
+        
         if status == "pending":
             status = "pending_review"
         elif status == "ai_process":
@@ -169,19 +170,9 @@ async def review_queue(
 
         # Remove payer filter from SQL; will filter on extraction_results below
 
-        if search:
-            q = f"%{search}%"
-            where.append(
-                """
-                (
-                    uf.original_filename ILIKE %s OR
-                    p.name ILIKE %s OR
-                    uf.processing_status ILIKE %s OR
-                    u.full_name ILIKE %s
-                )
-                """
-            )
-            params.extend([q, q, q, q])
+        # NOTE: Search filter is NOT applied here in PostgreSQL because 
+        # claim_number is stored in MongoDB (extraction_results).
+        # Search filtering happens later at the MongoDB extraction level.
 
         where_sql = " AND ".join(where)
 
@@ -222,14 +213,16 @@ async def review_queue(
         # ---------------------------
         mongo_file_ids = [r[0] for r in pg_rows]
 
-        mongo_docs = await db_module.db["extraction_results"].find(
-            {
-                "fileId": {"$in": mongo_file_ids},
-                "status": {
-                    "$nin": ["exception", "need_template", "assign_payer", "ocr_failed", "generated"]
-                }
+        # Fetch all extraction results - search filtering happens at application level
+        # because filename comes from PostgreSQL, not MongoDB
+        mongo_query = {
+            "fileId": {"$in": mongo_file_ids},
+            "status": {
+                "$nin": ["need_template", "assign_payer", "ocr_failed"]
             }
-        ).to_list(length=None)
+        }
+
+        mongo_docs = await db_module.db["extraction_results"].find(mongo_query).to_list(length=None)
 
         extraction_map = {}
         for d in mongo_docs:
@@ -282,7 +275,8 @@ async def review_queue(
                 ext_payer = ext.get("payerName", "")
                 ext_filename = filename or ""
                 ext_reviewer = reviewer_id or ""
-                ext_search_str = f"{ext_filename} {ext_payer} {ext_status} {ext_reviewer}".lower()
+                claim_number = ext.get("claimNumber", "N/A")
+                ext_search_str = f"{ext_filename} {ext_payer} {ext_status} {ext_reviewer} {claim_number}".lower()
                 if status != "all" and ext_status != status:
                     continue
                 if payer != "all" and (not ext_payer or payer.lower() not in ext_payer.lower()):
@@ -300,7 +294,6 @@ async def review_queue(
                     continue
                 claim_line_id = ext.get("_id", "")
                 reviewer_ids = ext.get("reviewerId", None)
-                claim_number = ext.get("claimNumber", "N/A")
                 table_rows.append(
                     {
                         "file_id": file_id,

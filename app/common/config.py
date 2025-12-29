@@ -9,8 +9,15 @@ load_dotenv()
 
 
 class Settings(BaseSettings):
+    # Extra fields to match .env and environment variables (must be uppercase for Pydantic v2)
+    OPENAI_MODEL: Optional[str] = None
+    OPENAI_TEMPERATURE: Optional[float] = None
+    OPENAI_MAX_TOKENS: Optional[int] = None
+    MONGODB_URL: Optional[str] = None
+    POSTGRES_URL: Optional[str] = None
     MONGO_URI: str = "mongodb://eob:eob2025@112.196.42.18:27017/eob?authSource=eob"
     MONGO_DB: str = "eob"
+    REDIS_URL: str = "redis://localhost:6379/0"
     APP_NAME: str = "EOB-835"
 
     # JWT
