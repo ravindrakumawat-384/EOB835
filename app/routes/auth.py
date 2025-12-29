@@ -110,7 +110,7 @@ async def _get_user_by_id(user_id: str) -> dict | None:
             return cur.fetchone()
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register(payload: RegisterRequest) -> Any:
     existing = await _get_user_by_email(payload.email)
     if existing:
@@ -137,7 +137,7 @@ async def register(payload: RegisterRequest) -> Any:
     return {"message": "user created", "access_token": access, "refresh_token": refresh}
 
 
-@router.post("", response_model=LoginResponse)
+@router.post("/login", response_model=LoginResponse)
 async def login(payload: LoginRequest) -> Any:
     user = await _get_user_by_email(payload.email)
     print("user-----> ", user)
@@ -218,7 +218,7 @@ async def login(payload: LoginRequest) -> Any:
     }
 
 
-@router.post("", response_model=TokenResponse)
+@router.post("/refresh", response_model=TokenResponse)
 async def refresh(payload: RefreshRequest) -> Any:
     try:
         print("Enter in Referesh payload----------->", payload)
@@ -278,7 +278,7 @@ async def refresh(payload: RefreshRequest) -> Any:
     }
 
 
-@router.post("")
+@router.post("/request-password-reset")
 async def request_password_reset(payload: RequestResetRequest) -> Any:
     user = await _get_user_by_email(payload.email)
     # Always return success to avoid user enumeration
@@ -317,7 +317,7 @@ async def request_password_reset(payload: RequestResetRequest) -> Any:
     return {"message": "Password reset link has been sent to your email."}
     
 
-@router.post("")
+@router.post("/reset-password")
 async def reset_password(payload: ResetPasswordRequest) -> Any:
     # verify token
     print("enter in Reset Password")
@@ -423,7 +423,7 @@ async def reset_password(payload: ResetPasswordRequest) -> Any:
 
 
 # Logout endpoint
-@router.post("")
+@router.post("/logout")
 async def logout(payload: LogoutRequest, request: Request):
     """
     Invalidate the provided refresh token (logout user).
@@ -446,7 +446,7 @@ async def logout(payload: LogoutRequest, request: Request):
     
 
 # change-password endpoint
-@router.post("")
+@router.post("/change-password")
 async def change_password(payload: ChangePasswordRequest, user: dict = Depends(get_current_user)):
 # async def change_password(payload: ChangePasswordRequest):
     """
