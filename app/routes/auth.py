@@ -148,29 +148,37 @@ async def login(payload: LoginRequest) -> Any:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials. Please check email and password.")
 
     # Invitation link expiration logic
-    if not user.get("is_active", True) and not user.get("last_login_at"):
-        print("222")
-        # User is invited but not yet activated
-        with get_pg_conn() as conn:
-            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute(
-                    "SELECT expires_at FROM refresh_tokens WHERE user_id = %s ORDER BY expires_at DESC LIMIT 1",
-                    (user["id"],)
-                )
-                print("333 user[id]-----> ", user["id"])
-                invite_token_row = cur.fetchone()
-                print("444 invite_token_row-----> ", invite_token_row)
-        if not invite_token_row:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invitation link expired or invalid. Please contact your admin for a new invite.")
-        expires_at = invite_token_row["expires_at"]
-        if expires_at < datetime.utcnow():
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invitation link has expired. Please contact your admin for a new invite.")
-        # Optionally, you can allow login if you want, or force activation flow
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Please activate your account using the invitation link sent to your email.")
+    # if not user.get("is_active", True) and not user.get("last_login_at"):
+    #     print("222")
+    #     # User is invited but not yet activated
+    #     with get_pg_conn() as conn:
+    #         print("222 11")
+    #         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+    #             cur.execute(
+    #                 "SELECT expires_at FROM refresh_tokens WHERE user_id = %s ORDER BY expires_at DESC LIMIT 1",
+    #                 (user["id"],)
+    #             )
+    #             print("333 user[id]-----> ", user["id"])
+    #             invite_token_row = cur.fetchone()
+    #             print("444 invite_token_row-----> ", invite_token_row)
+    #     if not invite_token_row:
+    #         print("enter in invite_token_row")
+    #         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invitation link expired or invalid. Please contact your admin for a new invite.")
+    #     expires_at = invite_token_row["expires_at"]
+    #     print("expires_at-----> ", expires_at)
+    #     if expires_at < datetime.utcnow():
+    #         print("Enter in expired invitation link block")
+    #         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invitation link has expired. Please contact your admin for a new invite.")
+    #     # Optionally, you can allow login if you want, or force activation flow
+    #     print("555")
+    #     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Please activate your account using the invitation link sent to your email.")
 
     access = create_access_token(user["id"])
+    print("access token-----> ", access)
     refresh = create_refresh_token(user["id"])
+    print("refresh token-----> ", refresh)
     dec = decode_token(refresh)
+    print("decoded refresh token-----> ", dec)
     now = datetime.utcnow()
     with get_pg_conn() as conn:
         with conn.cursor() as cur:

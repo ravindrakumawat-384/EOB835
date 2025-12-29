@@ -84,16 +84,9 @@ async def serialize_usr(doc: dict) -> UserItem:
             logger.info(f"Fetched user for user_id: {user}")
             status = "active" if user and user.get("is_active") else "inactive"
             
-            print()
-            print()
             last_login_at=user.get("last_login_at")
-            print("last_login_at---> ", last_login_at)
-            print("last_login_at---> ", last_login_at)
             is_logged = False if not last_login_at else True
-            print("is_logged---> ", is_logged)
-            print("is_logged---> ", is_logged)
-            print()
-            print()
+            
             return UserItem(
                 id=user["id"] if user else doc["user_id"],
                 name=user["full_name"] if user else "",
@@ -237,24 +230,26 @@ async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(ge
                     send_invite_email(payload["email"], temp_pass, payload.get("name", ""), org_name, invite_token)
                 else:
                     raise HTTPException(status_code=500, detail="User already exists. Please use a different email.")
-                # Insert new membership
+                # Insert new membership with generated UUID for id
+                membership_id = str(uuid.uuid4())
                 cur.execute(
-                    "INSERT INTO organization_memberships (org_id, user_id, role, created_at) VALUES (%s, %s, %s, %s) RETURNING id",
-                    (org_id, add_user_id, payload["role"], datetime.utcnow())
+                    "INSERT INTO organization_memberships (id, org_id, user_id, role, created_at) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                    (membership_id, org_id, add_user_id, payload["role"], datetime.utcnow())
                 )
                 member_id = cur.fetchone()["id"]
 
-                # Fetch last_login_at for the new user
-                cur.execute("SELECT last_login_at FROM users WHERE id = %s LIMIT 1", (add_user_id,))
-                user_row = cur.fetchone()
-                last_login_at = user_row["last_login_at"] if user_row else None
+                # # Fetch last_login_at for the new user
+                # cur.execute("SELECT last_login_at FROM users WHERE id = %s LIMIT 1", (add_user_id,))
+                # user_row = cur.fetchone()
+                # last_login_at = user_row["last_login_at"] if user_row else None
+                # is_logged = False if not last_login_at else True
                 
                 conn.commit()
             logger.info(f"Created team member: {member_id}")
-            is_logged = False if not last_login_at else True
+            
             
 
-            return {"message": "User added successfully", "is_logged": is_logged}
+            return {"message": "User added successfully"}
     except Exception as e:
         logger.error(f"Failed to create team member: {e}")
         raise HTTPException(status_code=500, detail="Failed to create team member.")

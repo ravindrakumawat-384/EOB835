@@ -113,6 +113,12 @@ async def patch_general_settings(payload: Dict[str, Any], user: Dict[str, Any] =
                 #         (update_data["name"], update_data["timezone"], org_id)
                 #     )
 
+                if update_data:
+                    cur.execute(
+                        "UPDATE organizations SET name = %s WHERE id = %s",
+                        (update_data["name"], org_id)
+                    )
+
                 if rp_update_data:
                     cur.execute(
                         "UPDATE retention_policies SET retention_days = %s WHERE org_id = %s",
