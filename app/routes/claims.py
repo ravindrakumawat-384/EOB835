@@ -18,7 +18,7 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/claims", tags=["claims"])
 
-@router.get("/claim_details")
+@router.get("")
 async def get_claims_detail(claim_id: str, user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     """
     Get the claim details with the given claim ID and database uses for this mongodb and PostgreSQL.
@@ -140,7 +140,7 @@ def apply_user_updates(claim: Dict[str, Any], updates: Dict[str, Any]) -> Dict[s
     return claim
 
 
-@router.post("/save_claims_data")
+@router.post("")
 async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: str, check: str, user: Dict[str, Any] = Depends(get_current_user)):
     try:
         version_collection = DB["claim_version"]
