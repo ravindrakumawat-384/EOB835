@@ -85,7 +85,19 @@ async def review_queue(
         pg = get_pg_conn()
 
         user_id = user.get("id")
-        
+
+        #=============User role================
+        cur_role = pg.cursor()
+        cur_role.execute(
+        """
+        SELECT role
+        FROM organization_memberships
+        WHERE user_id = %s
+        """,
+        (user_id,)
+        )
+        user_role = cur_role.fetchone()
+        print("User role===========:", user_role   )
         if status == "pending":
             status = "pending_review"
         elif status == "ai_process":
@@ -215,11 +227,22 @@ async def review_queue(
 
         # Fetch all extraction results - search filtering happens at application level
         # because filename comes from PostgreSQL, not MongoDB
-        mongo_query = {
-            "fileId": {"$in": mongo_file_ids},
-            "status": {
-                "$nin": ["need_template", "assign_payer", "ocr_failed"]
+        role = user_role[0].lower()
+        if role == "reviewer":
+            mongo_query = {
+                "fileId": {"$in": mongo_file_ids},
+                "status": {
+                    "$nin": ["need_template", "assign_payer", "ocr_failed", "exception"]
+                },
+                "reviewerId": {"$in": [user_id]}
             }
+        else:
+            print("User role is not reviewer")  
+            mongo_query = {
+                "fileId": {"$in": mongo_file_ids},
+                "status": {
+                    "$nin": ["need_template", "assign_payer", "ocr_failed", "exception"]
+                }
         }
 
         mongo_docs = await db_module.db["extraction_results"].find(mongo_query).to_list(length=None)

@@ -204,7 +204,7 @@ async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(ge
                     # Create new user
                     import uuid
                     new_user_id = str(uuid.uuid4())
-                    password = hash_password("changeme123")
+                    password = hash_password("Password@123")
                     cur.execute(
                         "INSERT INTO users (id, email, full_name, password_hash, is_active, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, NOW(), NOW())",
                         (new_user_id, payload["email"], payload.get("name", ""), password, False)
@@ -222,7 +222,7 @@ async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(ge
                     )
 
                     # Send invite email with expiration info
-                    temp_pass = "changeme123"
+                    temp_pass = "Password@123"
                     # invite_link = f"https://your-app-url.com/invite?token={invite_token}"
                     # email_body = f"Hello {payload.get('name', '')},\nYou have been invited to join {org_name}. Please use this link to set your password and activate your account.\n\nInvite Link: {invite_link}\nThis link will expire in 24 hours."
                     # send_invite_email(payload["email"], temp_pass, payload.get("name", ""), org_name, email_body=email_body)
@@ -249,7 +249,7 @@ async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(ge
             
             
 
-            return {"message": "User added successfully"}
+            return {"success": "User added successfully"}
     except Exception as e:
         logger.error(f"Failed to create team member: {e}")
         raise HTTPException(status_code=500, detail="Failed to create team member.")
@@ -271,7 +271,7 @@ async def patch_user(payload: Dict[str, Any]):
                     (payload["role"], member_id)
                 )
                 conn.commit()
-        return {"Success": "User updated successfully"}
+        return {"success": "User updated successfully"}
     except Exception as e:
         logger.error(f"Failed to update user: {e}")
         raise HTTPException(status_code=500, detail="Failed to update user")

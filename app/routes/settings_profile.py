@@ -91,9 +91,9 @@ async def get_user_profile(user: Dict[str, Any] = Depends(get_current_user)):
                 "firstName": first_name,
                 "lastName": last_name,
                 "email": user_data.get("email", ""),
-                "phone": user_prof_data.get("mobile", "N/A") if user_prof_data else "N/A",
+                "phone": user_prof_data.get("mobile", "N/A") if user_prof_data else "",
                 "organization": org_name,
-                "location": user_prof_data.get("location", "N/A") if user_prof_data else "N/A",
+                "location": user_prof_data.get("location", "N/A") if user_prof_data else "",
                 # "timezone": user_prof_data.get("timezone", "pt") if user_prof_data else "pt",
                 # "dateFormat": user_prof_data.get("date_format", "MM/DD/YYYY") if user_prof_data else "MM/DD/YYYY"
             },
