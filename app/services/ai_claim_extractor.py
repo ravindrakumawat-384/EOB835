@@ -232,19 +232,20 @@ async def extract_with_openai(
             SCORING GUIDE:
             - 1-40: Inferred, partially matched, or noisy OCR.
             - 41-80: Found but with minor ambiguity or slight positional deviation.
-            - 81-100: Exact match, clean extraction, strong positional alignment.
+            - 81-97: Exact match, clean extraction, strong positional alignment.
 
             DOCUMENT-LEVEL aiConfidence:
             - Compute as a WEIGHTED AGGREGATE of field-level confidence.
             - Critical fields (claim number, payment amount, dates) carry higher weight.
-            - Output ONE final aiConfidence integer (1–100).
+            - Output ONE final aiConfidence integer (1–97).
 
             STRICT RULES:
             1. dynamic_keys DEFINES THE SCHEMA. COPY structure EXACTLY.
             2. Add "value" and "confidence" (dynamic score) to each field.
             3. Extract ONLY from raw_text. If not found, set value to null and confidence to 0.
             4. DO NOT use static or default confidence values.
-            5. Output MUST be deterministic and justifiable.
+            5. Do Not read $ sign from raw_text.
+            6. Output MUST be deterministic and justifiable.
 
             MANDATORY OUTPUT FORMAT:
             {{
@@ -361,7 +362,7 @@ async def extract_with_openai(
             3. If label exists, value MUST be extracted.
             4. Dates: if range, return ONLY the FIRST date.
             5. Output JSON ONLY.
-            6. In amount don't read $ sign.
+            6. Do Not read $ sign from raw_text.
 
             LABELS:
             {missing_labels}
