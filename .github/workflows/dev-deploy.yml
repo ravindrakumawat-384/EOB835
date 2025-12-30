@@ -106,6 +106,10 @@ jobs:
               --env-file ~/eob-be-dev/.env \
               eob-be-dev:latest
 
+            echo "Restarting Celery containers..."
+            docker restart eob-be-dev-celery-beat || true
+            docker restart eob-be-dev-celery-worker || true
+
             echo "Cleaning unused images..."
             docker image prune -f
 
