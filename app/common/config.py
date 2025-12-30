@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     POSTGRES_URL: Optional[str] = None
     MONGO_URI: str = "mongodb://eob:eob2025@112.196.42.18:27017/eob?authSource=eob"
     MONGO_DB: str = "eob"
-    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_URL: str = "redis://redis:6379/0"
     APP_NAME: str = "EOB-835"
 
     # JWT
