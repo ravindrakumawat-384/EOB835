@@ -3,6 +3,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
 from datetime import datetime
+import uuid
+import secrets
+from datetime import timedelta
 from ..services.auth_deps import get_current_user, require_role
 from ..utils.logger import get_logger
 from app.common.db.pg_db import get_pg_conn
@@ -31,21 +34,10 @@ class TableHeaderAction(BaseModel):
     icon: str
     styleClass: str
 
-
 class TableHeader(BaseModel):
     field: Optional[str] = None
     label: str
     actions: Optional[List[TableHeaderAction]] = None
-
-
-# if there is no action then field is mandatory
-
-
-# class UserItem(BaseModel):
-#     name: str
-#     email: str
-#     role: str
-#     status: str
 
 class UserItem(BaseModel):
     id: str
@@ -176,9 +168,6 @@ async def get_users(user: Dict[str, Any] = Depends(get_current_user)):
 @router.post("/")
 async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
     try:
-        import uuid
-        import secrets
-        from datetime import timedelta
         user_id = user.get("id")
         with get_pg_conn() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -214,7 +203,7 @@ async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(ge
 
                     # Generate invite token and expiration
                     invite_token = secrets.token_urlsafe(32)
-                    expires_at = datetime.utcnow() + timedelta(minutes=10)
+                    expires_at = datetime.utcnow() + timedelta(minutes=60)
                     # Store invite token and expiration in refresh_tokens table
                     cur.execute(
                         "INSERT INTO refresh_tokens (jti, user_id, created_at, expires_at) VALUES (%s, %s, %s, %s)",
@@ -291,9 +280,13 @@ async def del_user(member_id: str, user: Dict[str, Any] = Depends(get_current_us
                     raise HTTPException(status_code=404, detail="Organization not found")
                 org_id = org["org_id"]
                 # Delete membership
+                # cur.execute(
+                #     "DELETE FROM organization_memberships WHERE user_id = %s AND org_id = %s",
+                #     (member_id, org_id)
+                # )
                 cur.execute(
-                    "DELETE FROM organization_memberships WHERE user_id = %s AND org_id = %s",
-                    (member_id, org_id)
+                    "DELETE FROM users WHERE id = %s",
+                    (member_id,)
                 )
                 conn.commit()
         return {"message": "User deleted successfully"}
