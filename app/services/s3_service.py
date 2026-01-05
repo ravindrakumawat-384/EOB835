@@ -43,19 +43,29 @@ class S3Service:
             raise
 
     
-    def generate_presigned_url(self, s3_key: str, expiration: int = 3600) -> Optional[str]:
-        """Generate a presigned URL for downloading a file from S3"""
+    def generate_presigned_url(self, s3_key: str, expiration: int = 3600, response_content_disposition: Optional[str] = None, response_content_type: Optional[str] = None) -> Optional[str]:
+        """Generate a presigned URL for downloading a file from S3.
+
+        Optional parameters allow overriding the response content type and adding
+        a ResponseContentDisposition header to force download with a filename.
+        """
         try:
             parsed = urlparse(s3_key)
             bucket_name = parsed.netloc
             file_name = parsed.path.lstrip("/")
+            params = {
+                'Bucket': bucket_name,
+                'Key': file_name,
+            }
+            # Allow caller to override response content type (default to pdf)
+            params['ResponseContentType'] = response_content_type or "application/pdf"
+            # Allow setting content disposition to force attachment filename
+            if response_content_disposition:
+                params['ResponseContentDisposition'] = response_content_disposition
+
             response = self.s3.generate_presigned_url(
                 'get_object',
-                Params={
-                    'Bucket': bucket_name,
-                    'Key': file_name,
-                    "ResponseContentType": "application/pdf"
-                },
+                Params=params,
                 ExpiresIn=expiration
             )
             logger.info(f"Generated presigned URL for {s3_key}, {response}")

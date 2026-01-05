@@ -22,6 +22,10 @@ async def get_current_user(token: HTTPAuthorizationCredentials = Depends(bearer)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
     except JWTError as e:
         print("Token decoding failed")
+        # Map expired token error to a user-friendly message so frontend can redirect to login
+        msg = str(e).lower()
+        if "expired" in msg:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Your session is expired")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(e))
     except Exception as e:
         print("Token decoding failed (unknown error)")
