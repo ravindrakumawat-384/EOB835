@@ -190,10 +190,13 @@ async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(ge
 
                 # Check if user exists
                 cur.execute("SELECT id FROM users WHERE email = %s LIMIT 1", (payload["email"],))
-                usr = cur.fetchone()
+                try:
+                    usr = cur.fetchone()
+                except:
+                    usr = None
                 if not usr:
                     # Create new user
-                    import uuid
+                    # import uuid
                     new_user_id = str(uuid.uuid4())
                     password = hash_password("Password@123")
                     cur.execute(

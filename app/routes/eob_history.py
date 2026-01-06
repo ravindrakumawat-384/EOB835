@@ -50,6 +50,21 @@ async def get_eob_history(
                 )
                 files = cur.fetchall()
 
+                # Fetch list of payers for this org to return for UI filters
+                cur.execute(
+                    """
+                    SELECT id::text AS id, name
+                    FROM payers
+                    WHERE org_id = %s
+                    ORDER BY name
+                    """,
+                    (org_id,)
+                )
+                payer_rows = cur.fetchall()
+                payer_list = [{"label": "All Payers", "value": "all"}] + [
+                    {"label": r.get("name") if isinstance(r, dict) else r[1], "value": r.get("name") if isinstance(r, dict) else r[1]} for r in payer_rows
+                ]
+
         # If no files, return empty structure
         if not files:
             table_headers = [
@@ -57,7 +72,7 @@ async def get_eob_history(
                 # {"field": "fileType", "label": "Type"},
                 {"field": "payer", "label": "Payer"},
                 {"field": "claimId", "label": "Claim ID"},
-                {"field": "checkNumber", "label": "Check #"},
+                # {"field": "checkNumber", "label": "Check #"},
                 {"field": "patient", "label": "Patient"},
                 {"field": "date", "label": "Date", "isDate": True},
                 {"field": "status", "label": "Status"},
@@ -119,7 +134,7 @@ async def get_eob_history(
                         # "fileType": file_type,
                         "payer": ext_payer or "-",
                         "claimId": claim_id or "-",
-                        "checkNumber": check_num or "-",
+                        # "checkNumber": check_num or "-",
                         "patient": patient or "-",
                         "date": date_str or "-",
                         "status": ext_status or "-",
@@ -147,7 +162,7 @@ async def get_eob_history(
                     # "fileType": file_type,
                     "payer": payer_name or "-",
                     "claimId": "-",
-                    "checkNumber": "-",
+                    # "checkNumber": "-",
                     "patient": "-",
                     "date": date_str or "-",
                     "status": file_status or "-",
@@ -193,7 +208,7 @@ async def get_eob_history(
             # {"field": "fileType", "label": "Type"},
             {"field": "payer", "label": "Payer"},
             {"field": "claimId", "label": "Claim ID"},
-            {"field": "checkNumber", "label": "Check #"},
+            # {"field": "checkNumber", "label": "Check #"},
             {"field": "patient", "label": "Patient"},
             {"field": "date", "label": "Date", "isDate": True},
             {"field": "status", "label": "Status"},
@@ -208,6 +223,7 @@ async def get_eob_history(
                 "pagination": {"total": total_records, "page": page, "page_size": page_size},
                 "total_records": total_records,
             },
+            'payer_list':payer_list,
         }
     except Exception as e:
         logger.exception("Failed to fetch EOB history: %s", e)
