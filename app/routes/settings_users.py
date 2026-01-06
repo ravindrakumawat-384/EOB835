@@ -169,7 +169,7 @@ async def get_users(user: Dict[str, Any] = Depends(get_current_user)):
 # -------------------- ADD USER --------------------
 @router.post("")
 async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
-    # try:
+    try:
         user_id = user.get("id")
         with get_pg_conn() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -241,9 +241,9 @@ async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(ge
             
 
             return {"success": "User added successfully"}
-    # except Exception as e:
-    #     logger.error(f"Failed to create team member: {e}")
-    #     raise HTTPException(status_code=500, detail="Failed to create team member.")
+    except Exception as e:
+        logger.error(f"Failed to create team member: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create team member.")
 
 
 # -------------------- UPDATE USER --------------------
