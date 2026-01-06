@@ -18,7 +18,8 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/claims", tags=["claims"])
 
-@router.get("")
+
+@router.get("/claim_details")
 async def get_claims_detail(claim_id: str, user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     """
     Get the claim details with the given claim ID and database uses for this mongodb and PostgreSQL.
