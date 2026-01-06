@@ -17,8 +17,8 @@ async def get_exception_files(
     user: Dict[str, Any] = Depends(get_current_user),
     search: Optional[str] = Query(None, description="Search by file name, error type, or description"),
     exception_type: Optional[str] = Query("all", description="Filter by exception type"),
-    date_from: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
-    date_to: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    # date_from: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    # date_to: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=1000),
 ):
@@ -101,10 +101,10 @@ async def get_exception_files(
                 if r.get("exceptionType") != exception_type:
                     continue
             # date filters
-            if date_from and r.get("date") < date_from:
-                continue
-            if date_to and r.get("date") > date_to:
-                continue
+            # if date_from and r.get("date") < date_from:
+            #     continue
+            # if date_to and r.get("date") > date_to:
+            #     continue
             # search already applied in SQL, but keep additional safety
             if search and s not in f"{r.get('fileName','')} {r.get('payer','')} {r.get('exceptionType','')} {r.get('description','') }".lower():
                 continue
@@ -123,7 +123,8 @@ async def get_exception_files(
             {"field": "payer", "label": "Payer"},
             {"field": "exceptionType", "label": "Exception Type", "mutlicell": True},
             {"field": "description", "label": "Description"},
-            {"field": "date", "label": "Date"},
+            {"field": "date", "label": "Date", "isDate": True},
+            
             {"label": "Actions"},
         ]
 

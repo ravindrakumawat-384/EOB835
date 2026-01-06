@@ -19,8 +19,8 @@ async def get_eob_history(
     search: Optional[str] = Query(None),
     payer: Optional[str] = Query("all"),
     status: Optional[str] = Query("all"),
-    date_from: Optional[str] = Query(None),
-    date_to: Optional[str] = Query(None),
+    # date_from: Optional[str] = Query(None),
+    # date_to: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=1000),
 ):
@@ -54,7 +54,7 @@ async def get_eob_history(
         if not files:
             table_headers = [
                 {"field": "fileName", "label": "File Name"},
-                {"field": "fileType", "label": "Type"},
+                # {"field": "fileType", "label": "Type"},
                 {"field": "payer", "label": "Payer"},
                 {"field": "claimId", "label": "Claim ID"},
                 {"field": "checkNumber", "label": "Check #"},
@@ -101,11 +101,11 @@ async def get_eob_history(
                     ext_payer = ext.get("payerName") or payer_name
                     ext_status = ext.get("status") or file_status
                     # infer file type
-                    fn_lower = (filename or "").lower()
-                    if ".x12" in fn_lower or "835" in fn_lower:
-                        file_type = "835"
-                    else:
-                        file_type = "EOB"
+                    # fn_lower = (filename or "").lower()
+                    # if ".x12" in fn_lower or "835" in fn_lower:
+                    #     file_type = "835"
+                    # else:
+                    #     file_type = "EOB"
                     date_str = None
                     if uploaded_at:
                         try:
@@ -116,7 +116,7 @@ async def get_eob_history(
                     rows.append({
                         "id": str(ext.get("_id") or claim_id),
                         "fileName": filename,
-                        "fileType": file_type,
+                        # "fileType": file_type,
                         "payer": ext_payer or "-",
                         "claimId": claim_id or "-",
                         "checkNumber": check_num or "-",
@@ -130,11 +130,11 @@ async def get_eob_history(
                     })
             else:
                 # No extraction docs, add a row with basic info
-                fn_lower = (filename or "").lower()
-                if ".x12" in fn_lower or "835" in fn_lower:
-                    file_type = "835"
-                else:
-                    file_type = "EOB"
+                # fn_lower = (filename or "").lower()
+                # if ".x12" in fn_lower or "835" in fn_lower:
+                #     file_type = "835"
+                # else:
+                #     file_type = "EOB"
                 date_str = None
                 if uploaded_at:
                     try:
@@ -144,7 +144,7 @@ async def get_eob_history(
                 rows.append({
                     "id": fid,
                     "fileName": filename,
-                    "fileType": file_type,
+                    # "fileType": file_type,
                     "payer": payer_name or "-",
                     "claimId": "-",
                     "checkNumber": "-",
@@ -172,12 +172,12 @@ async def get_eob_history(
                 if r.get("status") != status:
                     continue
             # date filters are simple date string compare
-            if date_from:
-                if r.get("date") < date_from:
-                    continue
-            if date_to:
-                if r.get("date") > date_to:
-                    continue
+            # if date_from:
+            #     if r.get("date") < date_from:
+            #         continue
+            # if date_to:
+            #     if r.get("date") > date_to:
+            #         continue
             filtered.append(r)
 
         total_records = len(filtered)
@@ -190,7 +190,7 @@ async def get_eob_history(
 
         table_headers = [
             {"field": "fileName", "label": "File Name"},
-            {"field": "fileType", "label": "Type"},
+            # {"field": "fileType", "label": "Type"},
             {"field": "payer", "label": "Payer"},
             {"field": "claimId", "label": "Claim ID"},
             {"field": "checkNumber", "label": "Check #"},

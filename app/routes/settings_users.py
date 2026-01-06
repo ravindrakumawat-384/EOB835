@@ -46,6 +46,7 @@ class UserItem(BaseModel):
     role: str
     status: str
     is_logged: bool
+    is_current_user: bool
 
 
 class TeamMembersTableData(BaseModel):
@@ -66,7 +67,7 @@ class UsersResponse(BaseModel):
 
 
 # -------------------- UTILS --------------------
-async def serialize_usr(doc: dict) -> UserItem:
+async def serialize_usr(doc: dict, current_user_id: str) -> UserItem:
     if not doc:
         return None
     with get_pg_conn() as conn:
@@ -85,8 +86,8 @@ async def serialize_usr(doc: dict) -> UserItem:
                 email=user["email"] if user else "",
                 role=doc.get("role"),
                 status=status,
-                is_logged=is_logged
-
+                is_logged=is_logged,
+                is_current_user=user["id"] == current_user_id
             )
 
 
@@ -107,7 +108,8 @@ async def get_users(user: Dict[str, Any] = Depends(get_current_user)):
                 cur.execute("SELECT user_id, role FROM organization_memberships WHERE org_id = %s", (org_id,))
                 members = cur.fetchall()
                 # Exclude the current user from members
-                all_users = [await serialize_usr(doc) for doc in members if doc["user_id"] != user_id]
+                # all_users = [await serialize_usr(doc) for doc in members if doc["user_id"] != user_id]
+                all_users = [await serialize_usr(doc,user_id) for doc in members]
                 
                 print()
                 print("all_users-----> ", all_users)
