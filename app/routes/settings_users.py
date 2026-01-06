@@ -92,7 +92,7 @@ async def serialize_usr(doc: dict, current_user_id: str) -> UserItem:
 
 
 # -------------------- GET USERS -----------------
-@router.get("", response_model=UsersResponse, )
+@router.get("/", response_model=UsersResponse, )
 async def get_users(user: Dict[str, Any] = Depends(get_current_user)):
     try:
         user_id = user.get("id")
@@ -167,11 +167,10 @@ async def get_users(user: Dict[str, Any] = Depends(get_current_user)):
 
 
 # -------------------- ADD USER --------------------
-@router.post("")
+@router.post("/")
 async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
     try:
         user_id = user.get("id")
-        print("user_id--->", user_id)
         with get_pg_conn() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 # Get org_id for current user
@@ -180,7 +179,6 @@ async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(ge
                 if not org:
                     raise HTTPException(status_code=404, detail="Organization not found")
                 org_id = org["org_id"]
-                print("org_id--->", org_id)
 
                 # Get organization
                 cur.execute("SELECT name, timezone FROM organizations WHERE id = %s LIMIT 1", (org_id,))
@@ -189,37 +187,28 @@ async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(ge
                     logger.warning("Organization not found for org_id: %s", org_id)
                     raise HTTPException(status_code=404, detail="Organization not found")
                 org_name = org["name"]
-                print("org_name--->", org_name)
 
                 # Check if user exists
                 cur.execute("SELECT id FROM users WHERE email = %s LIMIT 1", (payload["email"],))
-
                 try:
                     usr = cur.fetchone()
                 except:
                     usr = None
-                
                 if not usr:
-                    print("if not usr--->")
                     # Create new user
-                    
+                    # import uuid
                     new_user_id = str(uuid.uuid4())
-                    print("new_user_id--->", new_user_id)
                     password = hash_password("Password@123")
-                    print("hashed password--->", password)
                     cur.execute(
                         "INSERT INTO users (id, email, full_name, password_hash, is_active, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, NOW(), NOW())",
                         (new_user_id, payload["email"], payload.get("name", ""), password, False)
                     )
                     add_user_id = new_user_id
-                    print("add_user_id--->", add_user_id)
 
 
                     # Generate invite token and expiration
                     invite_token = secrets.token_urlsafe(32)
-                    print("invite_token--->", invite_token)
                     expires_at = datetime.utcnow() + timedelta(minutes=60)
-                    print("expires_at--->", expires_at)
                     # Store invite token and expiration in refresh_tokens table
                     cur.execute(
                         "INSERT INTO refresh_tokens (jti, user_id, created_at, expires_at) VALUES (%s, %s, %s, %s)",
@@ -233,7 +222,6 @@ async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(ge
                     # send_invite_email(payload["email"], temp_pass, payload.get("name", ""), org_name, email_body=email_body)
 
                     send_invite_email(payload["email"], temp_pass, payload.get("name", ""), org_name, invite_token)
-                    print("Invite email sent to--->", payload["email"])
                 else:
                     raise HTTPException(status_code=500, detail="User already exists. Please use a different email.")
                 # Insert new membership with generated UUID for id
@@ -262,7 +250,7 @@ async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(ge
 
 
 # -------------------- UPDATE USER --------------------
-@router.patch("", dependencies=[Depends(require_role(["Admin"]))])
+@router.patch("/", dependencies=[Depends(require_role(["Admin"]))])
 async def patch_user(payload: Dict[str, Any]):
     try:
         member_id = payload.get("userId")
