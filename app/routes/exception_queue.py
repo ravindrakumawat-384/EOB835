@@ -71,6 +71,10 @@ async def get_exception_files(
                 return "unmapped_payer"
             if "password" in d or "corrupt" in d or "corrupted" in d:
                 return "unreadable_pdf"
+            if "pending" in d or "review" in d or "pending_review" in d:
+                return "pending_review"
+            if "ai" in d or "processing" in d or "ai_processing" in d:
+                return "ai_processing"
             return "other"
 
         # Build table data
