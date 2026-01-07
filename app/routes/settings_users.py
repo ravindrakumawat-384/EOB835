@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import uuid
 import secrets
 from datetime import timedelta
@@ -208,11 +208,13 @@ async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(ge
 
                     # Generate invite token and expiration
                     invite_token = secrets.token_urlsafe(32)
-                    expires_at = datetime.utcnow() + timedelta(minutes=60)
+                    # Use timezone-aware UTC datetimes so comparisons are consistent across servers
+                    created_at = datetime.now(timezone.utc)
+                    expires_at = created_at + timedelta(hours=24)  # 24 hours expiration
                     # Store invite token and expiration in refresh_tokens table
                     cur.execute(
                         "INSERT INTO refresh_tokens (jti, user_id, created_at, expires_at) VALUES (%s, %s, %s, %s)",
-                        (invite_token, add_user_id, datetime.utcnow(), expires_at)
+                        (invite_token, add_user_id, created_at, expires_at)
                     )
 
                     # Send invite email with expiration info
@@ -228,7 +230,7 @@ async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(ge
                 membership_id = str(uuid.uuid4())
                 cur.execute(
                     "INSERT INTO organization_memberships (id, org_id, user_id, role, created_at) VALUES (%s, %s, %s, %s, %s) RETURNING id",
-                    (membership_id, org_id, add_user_id, payload["role"], datetime.utcnow())
+                    (membership_id, org_id, add_user_id, payload["role"], datetime.now(timezone.utc))
                 )
                 member_id = cur.fetchone()["id"]
 
