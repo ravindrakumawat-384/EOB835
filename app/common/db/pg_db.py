@@ -9,10 +9,10 @@ def get_pg_conn():
 
    
     return psycopg2.connect(
-        dbname="eob",
-        user="eob",
-        password="eob2025",
-        host="112.196.42.18",
+        dbname="eob_db",
+        user="aman0622",
+        password="password1234",
+        host="127.0.0.1",
         port="5432"
     )
 

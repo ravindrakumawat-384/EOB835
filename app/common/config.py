@@ -18,7 +18,10 @@ class Settings(BaseSettings):
     MONGO_URI: str = "mongodb://eob:eob2025@112.196.42.18:27017/eob?authSource=eob"
     MONGO_DB: str = "eob"
     REDIS_URL: str = "redis://localhost:6379/0"
+    MONGO_URI: str = "mongodb://localhost:27017"
+    MONGO_DB: str = "eob_db_test"
     APP_NAME: str = "EOB-835"
+    REDIS_URL: str = "redis://localhost:6379/0"
 
     # JWT
     JWT_SECRET: str = Field("cc50ec6192f5f20c2931a99dd3ab22625df90527af1b56fc2d5516dff3c43e6b", env="JWT_SECRET")
@@ -51,4 +54,7 @@ def get_settings():
     return Settings()
 
 settings = get_settings()
+
+
+
 
