@@ -95,6 +95,6 @@ jobs:
             cmd.exe /c "echo Loading Docker image from TAR and deploying container... &&
             docker load -i C:\artifacts\eob-backend-api.tar &&
             docker rm -f eob-backend-api 2>nul &&
-            docker run -d --name eob-backend-api --restart unless-stopped -l com.docker.compose.project=eval --env-file C:\artifacts\.env -p 8001:8001 --network ai-gpu-machine_proxy-network eob-backend-api:latest &&
+            docker run -d --name eob-backend-api --restart unless-stopped --env-file C:\artifacts\.env -p 8001:8001 --network ai-gpu-machine_proxy-network eob-backend-api:latest &&
             if exist C:\artifacts\eob-backend-api.tar del /f /q C:\artifacts\eob-backend-api.tar &&
             if exist C:\artifacts\.env del /f /q C:\artifacts\.env
