@@ -127,28 +127,7 @@ async def update_user_profile(payload: Dict[str, Any], user: Dict[str, Any] = De
     print("payload-------------- :", payload)
     try:
         print("payload   update_user_profile:", payload)
-        print("Updating user profile...")
-        print("Updating user profile...")
-        print("Updating user profile...")
-        print("Updating user profile...")
-        print("Updating user profile...")
-        print("Updating user profile...")
-        print("Updating user profile...")
-        print("Updating user profile...")
-        print("Updating user profile...")
-        print("Updating user profile...")
-        print("Updating user profile...")
-        print("Updating user profile...")
-        print("Updating user profile...")
-        print("Updating user profile...")
-        print("Updating user profile...")
-        print("Updating user profile...")
-        print("Updating user profile...")
-        print("Updating user profile...")
-        print("Updating user profile...")
-        print("Updating user profile...")
-        print("Updating user profile...")
-        print("Updating user profile...")
+       
         # user_id = "6f64216e-7fbd-4abc-b676-991a121a95e4" # rv
         user_id = user.get("id")
         print("User ID:", user_id)
@@ -173,9 +152,9 @@ async def update_user_profile(payload: Dict[str, Any], user: Dict[str, Any] = De
                     if membership:
                         cur.execute("UPDATE organizations SET name = %s WHERE id = %s", (payload["organization"], membership[0]))
                 conn.commit()
-        logger.info(f"successfullysuccessfullysuccessfullysuccessfully: {user_id}")
-        return {"success": "successfullysuccessfullysuccessfullysuccessfullysuccessfully"}
-        
+        logger.info(f"successfull: {user_id}")
+        return {"success": "successfully"}
+
     except HTTPException:
         raise
     except Exception as e:
@@ -258,7 +237,10 @@ async def upload_profile_pic(file: UploadFile = File(...), user: Dict[str, Any] 
         # file_path = f"s3://{S3_BUCKET}/{filename}"
         responses = []
         # 5. Save file and metadata (to S3)
-        s3_path = s3_client.upload_file(content, file.filename)
+
+        profile_pic_path = f"profile_pic/{file.filename}"
+ 
+        s3_path = s3_client.upload_file(content, profile_pic_path)
         if not s3_path:
             responses.append({"filename": file.filename, "status": "error", "message": "Failed to upload to S3"})
             # continue

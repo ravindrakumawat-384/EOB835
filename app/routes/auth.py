@@ -1,7 +1,7 @@
 from typing import Any
 from fastapi import APIRouter, HTTPException, status, Depends, Body
 from pydantic import BaseModel, EmailStr
-from datetime import datetime
+from datetime import datetime, timezone
 import app.common.db.db as db_module
 from ..utils.auth_utils import (
     hash_password,
@@ -126,14 +126,17 @@ async def register(payload: RegisterRequest) -> Any:
                 "INSERT INTO users (id, email, password_hash, full_name, is_active, created_at, updated_at) VALUES (%s,%s,%s,%s,%s,%s,%s)",
                 (user_id, payload.email, hash_password(password), payload.full_name, True, now, now)
             )
-            access = create_access_token(user_id)
+            # Create refresh token as session identifier and store it (single session per user)
             refresh = create_refresh_token(user_id)
             decoded_refresh = decode_token(refresh)
+            sid = decoded_refresh.get("jti")
+            cur.execute("DELETE FROM refresh_tokens WHERE user_id = %s", (user_id,))
             cur.execute(
                 "INSERT INTO refresh_tokens (jti, user_id, created_at, expires_at) VALUES (%s,%s,%s,%s)",
-                (decoded_refresh.get("jti"), user_id, now, datetime.fromtimestamp(decoded_refresh.get("exp")))
+                (sid, user_id, now, datetime.fromtimestamp(decoded_refresh.get("exp")))
             )
             conn.commit()
+    access = create_access_token(user_id, extra={"sid": sid})
     return {"message": "user created", "access_token": access, "refresh_token": refresh}
 
 
@@ -148,53 +151,54 @@ async def login(payload: LoginRequest) -> Any:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials. Please check email and password.")
 
     # Invitation link expiration logic
-    # if not user.get("is_active", True) and not user.get("last_login_at"):
-    #     print("222")
-    #     # User is invited but not yet activated
-    #     with get_pg_conn() as conn:
-    #         print("222 11")
-    #         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-    #             cur.execute(
-    #                 "SELECT expires_at FROM refresh_tokens WHERE user_id = %s ORDER BY expires_at DESC LIMIT 1",
-    #                 (user["id"],)
-    #             )
-    #             print("333 user[id]-----> ", user["id"])
-    #             invite_token_row = cur.fetchone()
-    #             print("444 invite_token_row-----> ", invite_token_row)
-    #     if not invite_token_row:
-    #         print("enter in invite_token_row")
-    #         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invitation link expired or invalid. Please contact your admin for a new invite.")
-    #     expires_at = invite_token_row["expires_at"]
-    #     print("expires_at-----> ", expires_at)
-    #     if expires_at < datetime.utcnow():
-    #         print("Enter in expired invitation link block")
-    #         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invitation link has expired. Please contact your admin for a new invite.")
-    #     # Optionally, you can allow login if you want, or force activation flow
-    #     print("555")
-    #     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Please activate your account using the invitation link sent to your email.")
+    if not user.get("is_active", True) and not user.get("last_login_at"):
+        logger.debug("User appears to be invited and not yet activated: %s", user.get("id"))
+        # User is invited but not yet activated — verify invite token is present and not expired
+        with get_pg_conn() as conn:
+            logger.debug("User appears to be invited and not yet activated: %s", user.get("id"))
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT expires_at FROM refresh_tokens WHERE user_id = %s ORDER BY expires_at DESC LIMIT 1",
+                    (user["id"],)
+                )
+                invite_token_row = cur.fetchone()
+        if not invite_token_row:
+            logger.info("Invite token not found for user %s — blocking login", user["id"])
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invitation link expired or invalid. Please contact your admin for a new invite.")
+        expires_at = invite_token_row["expires_at"]
+        logger.debug("Invite token expires_at: %s", expires_at)
+        # Compare with timezone-aware UTC to avoid naive vs aware datetime TypeError
+        if expires_at < datetime.now(timezone.utc):
+            logger.info("Invitation link expired at %s — blocking login", expires_at)
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invitation link has expired. Please contact your admin for a new invite.")
+        # invite token exists and is still valid — allow login to proceed (user will be activated below)
+        logger.info("Invite token valid for user %s — allowing first-time login", user["id"])
 
-    access = create_access_token(user["id"])
-    print("access token-----> ", access)
+
+    # Create a refresh token and use its jti as the session id (sid)
     refresh = create_refresh_token(user["id"])
-    print("refresh token-----> ", refresh)
     dec = decode_token(refresh)
-    print("decoded refresh token-----> ", dec)
+    sid = dec.get("jti")
     now = datetime.utcnow()
     with get_pg_conn() as conn:
         with conn.cursor() as cur:
-            # Update last_login_at
+            # Update last_login_at and enforce single session: remove existing refresh tokens for this user
             cur.execute(
                 "UPDATE users SET is_active = TRUE, last_login_at = %s WHERE id = %s",
                 (now, user["id"])
             )
+            cur.execute("DELETE FROM refresh_tokens WHERE user_id = %s", (user["id"],))
             cur.execute(
                 "INSERT INTO refresh_tokens (jti, user_id, created_at, expires_at) VALUES (%s,%s,%s,%s)",
-                (dec.get("jti"), user["id"], now, datetime.fromtimestamp(dec.get("exp")))
+                (sid, user["id"], now, datetime.fromtimestamp(dec.get("exp")))
             )
             # Get org details
             cur.execute("SELECT org_id, role FROM organization_memberships WHERE user_id = %s LIMIT 1", (user["id"],))
             org_details = cur.fetchone()
             conn.commit()
+    # Create access token that includes sid so we can validate active session on requests
+    access = create_access_token(user["id"], extra={"sid": sid})
+
     expires_in = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 30
     if org_details:
         org_id = org_details[0]
@@ -262,12 +266,14 @@ async def refresh(payload: RefreshRequest) -> Any:
             cur.execute("DELETE FROM refresh_tokens WHERE jti = %s", (jti,))
             new_refresh = create_refresh_token(user_id)
             new_dec = decode_token(new_refresh)
+            # insert rotated refresh token
             cur.execute(
                 "INSERT INTO refresh_tokens (jti, user_id, created_at, expires_at) VALUES (%s,%s,%s,%s)",
                 (new_dec.get("jti"), user_id, datetime.utcnow(), datetime.fromtimestamp(new_dec.get("exp")))
             )
             conn.commit()
-    access = create_access_token(user_id)
+    # Create access token associated with this refresh jti (session id)
+    access = create_access_token(user_id, extra={"sid": new_dec.get("jti")})
     expires_in = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
     return {
         "access_token": access,
