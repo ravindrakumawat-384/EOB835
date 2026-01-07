@@ -1,0 +1,100 @@
+name: Deploy backend on GPU Windows Machine
+
+on:
+  push:
+    branches:
+      - devops01
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+        with:
+          ref: devops01
+
+      - name: Set up .env
+        run: echo "${{ secrets.EOB_ENV_SECRET }}" > .env
+
+
+      - name: Build Docker Image
+        run: |
+          docker build -t eob-backend-api .
+
+      - name: Save Docker Image to TAR
+        run: |
+          docker save  eob-backend-api -o eob-backend-api.tar
+          
+      # Ensure artifacts directory exists on Windows
+      - name: Ensure artifacts directory exists on Windows
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.WIN_HOST }}
+          username: ${{ secrets.WIN_USER }}
+          password: ${{ secrets.WIN_PASSWORD }}
+          port: 2222
+          script: |
+            powershell -Command "
+              if (Test-Path 'C:\artifacts') {
+                Write-Host 'C:\artifacts already exists. Skipping creation.'
+              } else {
+                Write-Host 'C:\artifacts not found. Creating directory.'
+                New-Item -ItemType Directory -Path 'C:\artifacts' | Out-Null
+              }
+            "
+        # REMOVE OLD TAR (MANDATORY ON WINDOWS)
+      - name: Remove old Docker image TAR on Windows
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.WIN_HOST }}
+          username: ${{ secrets.WIN_USER }}
+          password: ${{ secrets.WIN_PASSWORD }}
+          port: 2222
+          script: |
+            powershell -Command "
+              if (Test-Path 'C:\artifacts\eob-backend-api.tar') {
+                Write-Host 'Removing old eob-backend-api.tar';
+                Remove-Item -Force C:\artifacts\eval-backend-api.tar
+              } else {
+                Write-Host 'No old TAR found. Skipping removal.'
+              }
+            "
+      # Upload TAR file
+      - name: Upload TAR to Windows Server
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.WIN_HOST }}
+          username: ${{ secrets.WIN_USER }}
+          password: ${{ secrets.WIN_PASSWORD }}
+          port: 2222
+          source: "eob-backend-api.tar"
+          target: "C:/artifacts/"
+
+       # Upload .env file to Windows
+      - name: Upload .env to Windows Server
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.WIN_HOST }}
+          username: ${{ secrets.WIN_USER }}
+          password: ${{ secrets.WIN_PASSWORD }}
+          port: 2222
+          source: ".env"
+          target: "C:/artifacts/"
+
+      # Deploy on Windows
+      - name: SSH and Deploy on Windows
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.WIN_HOST }}
+          username: ${{ secrets.WIN_USER }}
+          password: ${{ secrets.WIN_PASSWORD }}
+          port: 2222
+          script: >
+            cmd.exe /c "echo Loading Docker image from TAR and deploying container... &&
+            docker load -i C:\artifacts\eob-backend-api.tar &&
+            docker rm -f eob-backend-api 2>nul &&
+            docker run -d --name eob-backend-api --restart unless-stopped -l com.docker.compose.project=eval --env-file C:\artifacts\.env -p 3000:3000 --network ai-gpu-machine_proxy-network eob-backend-api:latest &&
+            if exist C:\artifacts\eob-backend-api.tar del /f /q C:\artifacts\eob-backend-api.tar &&
+            if exist C:\artifacts\.env del /f /q C:\artifacts\.env
