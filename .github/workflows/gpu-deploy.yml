@@ -1,4 +1,4 @@
-name: Deploy backend on GPU Windows Machine
+name: Deploy EOB backend on GPU Windows Machine
 
 on:
   push:
