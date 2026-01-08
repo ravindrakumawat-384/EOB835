@@ -23,7 +23,7 @@ def send_reset_email(to_email: str, token: str) -> bool:
         msg["From"] = SMTP_USER
         msg["To"] = to_email
 
-        frontend = settings.FRONTEND_URL or ""
+        frontend = settings.FRONTEND_URL_LIVE or ""
         # reset_link = f"https://your-frontend/reset-password?token={reset_token}"
         reset_link = f"{frontend.rstrip('/')}" + f"/auth/set-password/{token}"
         
