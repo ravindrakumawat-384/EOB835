@@ -1,4 +1,3 @@
-from passlib.context import CryptContext
 from datetime import datetime, timedelta
 from typing import Dict, Any, Tuple
 from jose import jwt, JWSError
@@ -7,26 +6,44 @@ from uuid import uuid4
 from ..services.email_service import send_reset_email
 from jose import JWTError, ExpiredSignatureError
 import bcrypt
+from ..utils.logger import get_logger
 
-_pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
+logger = get_logger(__name__)
 
 
 def hash_password(password: str) -> str:
-    # Truncate password to 72 bytes for bcrypt compatibility
+    """Hash a password using bcrypt, truncating to 72 bytes as required.
+
+    We intentionally avoid using passlib's bcrypt handler here because some
+    environments have a mismatched `bcrypt` package that causes import-time
+    errors in passlib's version checks. Using the bcrypt library directly
+    avoids that issue and ensures consistent behavior.
+    """
+    # Normalize to bytes and truncate to 72 bytes (bcrypt limit)
     if isinstance(password, str):
-        password = password.encode("utf-8")[:72].decode("utf-8", errors="ignore")
-    return _pwd_ctx.hash(password)
+        password_bytes = password.encode("utf-8")
+    else:
+        password_bytes = password
+    if len(password_bytes) > 72:
+        # Truncate at byte-level to satisfy bcrypt requirement
+        password_bytes = password_bytes[:72]
+    hashed = bcrypt.hashpw(password_bytes, bcrypt.gensalt())
+    return hashed.decode("utf-8")
 
-
-# def verify_password(plain: str, hashed: str) -> bool:
-#     print("Verifying password-------->>> ", _pwd_ctx.verify(plain, hashed))
-#     return _pwd_ctx.verify(plain, hashed)
 
 def verify_password(password: str, password_hash: str) -> bool:
-    # Truncate password to 72 bytes for bcrypt compatibility
+    """Verify a password against a stored bcrypt hash, truncating to 72 bytes."""
     if isinstance(password, str):
-        password = password.encode("utf-8")[:72].decode("utf-8", errors="ignore")
-    return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+        password_bytes = password.encode("utf-8")
+    else:
+        password_bytes = password
+    if len(password_bytes) > 72:
+        password_bytes = password_bytes[:72]
+    try:
+        return bcrypt.checkpw(password_bytes, password_hash.encode("utf-8"))
+    except Exception as e:
+        logger.exception("Password verification failed: %s", e)
+        return False
 
 
 
@@ -79,53 +96,23 @@ def create_refresh_token(subject: str) -> str:
 
 def create_reset_token(subject: str, email) -> str:
     """Short-lived token used for password reset"""
-    now = _now()
-    print("got  email-------> ", email)
-    print("got  email-------> ", email)
-    print("got  email-------> ", email)
-    # expire = now + timedelta(minutes=settings.RESET_TOKEN_EXPIRE_MINUTES)
-    # payload = {
-    #     "sub": subject,
-    #     "type": "reset",
-    #     "exp": int(expire.timestamp()),
-    #     "iat": int(now.timestamp()),
-    #     "jti": str(uuid4()),
-    # }
-    # reset_payload = {"sub": subject, "exp": expire.isoformat(), "iat": now.isoformat(), "type": "reset"}
-
-
-    # now = datetime.utcnow()
-    print("subject---> ", subject)
-    print("subject---> ", subject)
-    print("subject---> ", subject)
-    # exp = now + timedelta(hours=1)
     exp = datetime.utcnow() + timedelta(hours=1)
     iat = datetime.utcnow()
 
-
     reset_payload = {"sub": subject, "exp": exp, "iat": iat, "type": "reset"}
     reset_token = jwt.encode(reset_payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
-    print()
-    print("reset_token---> ", reset_token)
-    print()
-    # reset_link = f"https://your-frontend/reset-password?token={reset_token}"
 
-    send_reset_email(email, reset_token)
-    # sent = send_reset_email(user["email"], token)
+    # send reset email (async/email service handles errors)
+    try:
+        send_reset_email(email, reset_token)
+    except Exception as e:
+        logger.exception("Failed to send reset email to %s: %s", email, e)
+        # still return a success-ish message to avoid exposing email send issues
     return {"message": "Password reset link has been sent to your email."}
 
 
-
-    # print(f"[create_reset_token] iat: {payload['iat']} ({datetime.utcfromtimestamp(payload['iat'])}), exp: {payload['exp']} ({datetime.utcfromtimestamp(payload['exp'])})")
-    return jwt.encode(reset_payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
-    # return jwt.encode(payload["jti"])
-    # return payload["jti"]
-
-
 def decode_token(token: str) -> Dict[str, Any]:
-    print("Enter in Decoding token:")
-    print("Enter in Decoding token:", token)
-    print("Return decode token===> ")
+    logger.debug("Decoding token")
     try:
         # Decode while verifying signature but not exp; we'll enforce exp with 60s leeway manually
         payload = jwt.decode(
@@ -139,15 +126,15 @@ def decode_token(token: str) -> Dict[str, Any]:
         if exp is not None:
             now = int(datetime.utcnow().timestamp())
             if now > int(exp) + 60:
-                print("Token expired (beyond leeway)")
+                logger.debug("Token expired (beyond leeway)")
                 raise ExpiredSignatureError("Token expired")
         return payload
     except ExpiredSignatureError:
-        print("Token expired")
+        logger.info("Token has expired")
         raise JWTError("Token expired")
     except JWTError:
-        print("Token decoding failed (invalid)")
+        logger.info("Token decoding failed (invalid)")
         raise JWTError("Invalid token")
     except Exception as e:
-        print("Token decoding failed (unknown error)")
+        logger.exception("Token decoding failed (unknown error): %s", e)
         raise JWTError("Invalid token")

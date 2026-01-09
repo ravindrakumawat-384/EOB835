@@ -2,7 +2,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
+import uuid
+import secrets
+from datetime import timedelta
 from ..services.auth_deps import get_current_user, require_role
 from ..utils.logger import get_logger
 from app.common.db.pg_db import get_pg_conn
@@ -31,21 +34,10 @@ class TableHeaderAction(BaseModel):
     icon: str
     styleClass: str
 
-
 class TableHeader(BaseModel):
     field: Optional[str] = None
     label: str
     actions: Optional[List[TableHeaderAction]] = None
-
-
-# if there is no action then field is mandatory
-
-
-# class UserItem(BaseModel):
-#     name: str
-#     email: str
-#     role: str
-#     status: str
 
 class UserItem(BaseModel):
     id: str
@@ -54,6 +46,7 @@ class UserItem(BaseModel):
     role: str
     status: str
     is_logged: bool
+    is_current_user: bool
 
 
 class TeamMembersTableData(BaseModel):
@@ -74,7 +67,7 @@ class UsersResponse(BaseModel):
 
 
 # -------------------- UTILS --------------------
-async def serialize_usr(doc: dict) -> UserItem:
+async def serialize_usr(doc: dict, current_user_id: str) -> UserItem:
     if not doc:
         return None
     with get_pg_conn() as conn:
@@ -93,8 +86,8 @@ async def serialize_usr(doc: dict) -> UserItem:
                 email=user["email"] if user else "",
                 role=doc.get("role"),
                 status=status,
-                is_logged=is_logged
-
+                is_logged=is_logged,
+                is_current_user=user["id"] == current_user_id
             )
 
 
@@ -115,7 +108,8 @@ async def get_users(user: Dict[str, Any] = Depends(get_current_user)):
                 cur.execute("SELECT user_id, role FROM organization_memberships WHERE org_id = %s", (org_id,))
                 members = cur.fetchall()
                 # Exclude the current user from members
-                all_users = [await serialize_usr(doc) for doc in members if doc["user_id"] != user_id]
+                # all_users = [await serialize_usr(doc) for doc in members if doc["user_id"] != user_id]
+                all_users = [await serialize_usr(doc,user_id) for doc in members]
                 
                 print()
                 print("all_users-----> ", all_users)
@@ -176,9 +170,6 @@ async def get_users(user: Dict[str, Any] = Depends(get_current_user)):
 @router.post("")
 async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
     try:
-        import uuid
-        import secrets
-        from datetime import timedelta
         user_id = user.get("id")
         with get_pg_conn() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -199,34 +190,47 @@ async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(ge
 
                 # Check if user exists
                 cur.execute("SELECT id FROM users WHERE email = %s LIMIT 1", (payload["email"],))
-                usr = cur.fetchone()
+                try:
+                    usr = cur.fetchone()
+                except:
+                    usr = None
                 if not usr:
                     # Create new user
-                    import uuid
                     new_user_id = str(uuid.uuid4())
                     password = hash_password("Password@123")
+                    now = datetime.now(timezone.utc)
                     cur.execute(
-                        "INSERT INTO users (id, email, full_name, password_hash, is_active, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, NOW(), NOW())",
-                        (new_user_id, payload["email"], payload.get("name", ""), password, False)
+                        "INSERT INTO users (id, email, full_name, password_hash, is_active, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                        (new_user_id, payload["email"], payload.get("name", ""), password, False, now, now)
                     )
                     add_user_id = new_user_id
 
+                    # Insert into user_profiles
+                    profile_id = str(uuid.uuid4())
+                    cur.execute(
+                        "INSERT INTO user_profiles (id, user_id, mobile, location, timezone, date_format, profile_pic_path, created_at, updated_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (profile_id, add_user_id, "1234567890", "New York", "EST", "MM/DD/YYYY", None, now, now)
+                    )
+
+                    # Insert into notification_preferences
+                    notif_id = str(uuid.uuid4())
+                    cur.execute(
+                        "INSERT INTO notification_preferences (id, user_id, upload_completed, review_required, export_ready, exceptions_detected, created_at, updated_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (notif_id, add_user_id, False, False, False, False, now, now)
+                    )
 
                     # Generate invite token and expiration
                     invite_token = secrets.token_urlsafe(32)
-                    expires_at = datetime.utcnow() + timedelta(minutes=10)
+                    created_at = now
+                    expires_at = created_at + timedelta(hours=24)  # 24 hours expiration
                     # Store invite token and expiration in refresh_tokens table
                     cur.execute(
                         "INSERT INTO refresh_tokens (jti, user_id, created_at, expires_at) VALUES (%s, %s, %s, %s)",
-                        (invite_token, add_user_id, datetime.utcnow(), expires_at)
+                        (invite_token, add_user_id, created_at, expires_at)
                     )
 
                     # Send invite email with expiration info
                     temp_pass = "Password@123"
-                    # invite_link = f"https://your-app-url.com/invite?token={invite_token}"
-                    # email_body = f"Hello {payload.get('name', '')},\nYou have been invited to join {org_name}. Please use this link to set your password and activate your account.\n\nInvite Link: {invite_link}\nThis link will expire in 24 hours."
-                    # send_invite_email(payload["email"], temp_pass, payload.get("name", ""), org_name, email_body=email_body)
-
                     send_invite_email(payload["email"], temp_pass, payload.get("name", ""), org_name, invite_token)
                 else:
                     raise HTTPException(status_code=500, detail="User already exists. Please use a different email.")
@@ -234,7 +238,7 @@ async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(ge
                 membership_id = str(uuid.uuid4())
                 cur.execute(
                     "INSERT INTO organization_memberships (id, org_id, user_id, role, created_at) VALUES (%s, %s, %s, %s, %s) RETURNING id",
-                    (membership_id, org_id, add_user_id, payload["role"], datetime.utcnow())
+                    (membership_id, org_id, add_user_id, payload["role"], datetime.now(timezone.utc))
                 )
                 member_id = cur.fetchone()["id"]
 
@@ -291,9 +295,13 @@ async def del_user(member_id: str, user: Dict[str, Any] = Depends(get_current_us
                     raise HTTPException(status_code=404, detail="Organization not found")
                 org_id = org["org_id"]
                 # Delete membership
+                # cur.execute(
+                #     "DELETE FROM organization_memberships WHERE user_id = %s AND org_id = %s",
+                #     (member_id, org_id)
+                # )
                 cur.execute(
-                    "DELETE FROM organization_memberships WHERE user_id = %s AND org_id = %s",
-                    (member_id, org_id)
+                    "DELETE FROM users WHERE id = %s",
+                    (member_id,)
                 )
                 conn.commit()
         return {"message": "User deleted successfully"}

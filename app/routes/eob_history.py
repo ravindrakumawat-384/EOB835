@@ -1,179 +1,320 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Dict, Any, Optional
 from app.common.db.pg_db import get_pg_conn
+import app.common.db.db as db_module
 import psycopg2.extras
 from ..services.auth_deps import get_current_user
 from ..utils.logger import get_logger
 from datetime import datetime
+from app.services.s3_service import S3Service
+from app.common.config import settings
 
 router = APIRouter(prefix="/eob-history", tags=["eob-history"])
 logger = get_logger(__name__)
 
-# GET /eob-history/files
-@router.get("/files", response_model=List[Dict[str, Any]])
-async def get_eob_files(
-	user: Dict[str, Any] = Depends(get_current_user),
-	file_name: Optional[str] = Query(None, description="Filter by file name"),
-	payer: Optional[str] = Query(None, description="Filter by payer name"),
-	status: Optional[str] = Query(None, description="Filter by status"),
-	date_from: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
-	date_to: Optional[str] = Query(None, description="End date (YYYY-MM-DD)")
+
+@router.get("/get_eob_history", response_model=Dict[str, Any])
+async def get_eob_history(
+    user: Dict[str, Any] = Depends(get_current_user),
+    search: Optional[str] = Query(None),
+    payer: Optional[str] = Query("all"),
+    status: Optional[str] = Query("all"),
+    # date_from: Optional[str] = Query(None),
+    # date_to: Optional[str] = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=1000),
 ):
-	"""
-	Get EOB file history for the current user's organization.
-	Returns a list of files with metadata for frontend display.
-	"""
-	try:
-		user_id = user.get("id")
-		with get_pg_conn() as conn:
-			with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-				# Get org_id for current user
-				cur.execute("SELECT org_id FROM organization_memberships WHERE user_id = %s LIMIT 1", (user_id,))
-				org = cur.fetchone()
-				if not org:
-					raise HTTPException(status_code=404, detail="Organization not found")
-				org_id = org["org_id"]
-
-				# Build query with joins for all required fields
-				query = """
-					SELECT
-						uf.id AS id,
-						uf.original_filename AS fileName,
-						uf.mime_type AS fileType,
-						COALESCE(p.name, '') AS payer,
-						COALESCE(c.claim_number, '') AS claimId,
-						COALESCE(pay.payment_reference, '') AS checkNumber,
-						COALESCE(c.patient_name, '') AS patient,
-						to_char(uf.uploaded_at, 'YYYY-MM-DD') AS date,
-						uf.processing_status AS status
-					FROM upload_files uf
-					LEFT JOIN payments pay ON pay.file_id = uf.id
-					LEFT JOIN claims c ON c.file_id = uf.id
-					LEFT JOIN payers p ON p.id = pay.payer_id
-					WHERE uf.org_id = %s
-				"""
-				params = [org_id]
-				if file_name:
-					query += " AND uf.original_filename ILIKE %s"
-					params.append(f"%{file_name}%")
-				if status:
-					query += " AND uf.processing_status = %s"
-					params.append(status)
-				if date_from:
-					query += " AND uf.uploaded_at >= %s"
-					params.append(date_from)
-				if date_to:
-					query += " AND uf.uploaded_at <= %s"
-					params.append(date_to)
-
-				query += " ORDER BY uf.uploaded_at DESC LIMIT 100"
-				cur.execute(query, tuple(params))
-				files = cur.fetchall()
-				
-                # Add view/download URLs for Actions
-				for f in files:
-					file_id = f["id"]
-					f["actions"] = {
-						"view_url": f"/eob-history/files/{file_id}/view",
-						"download_url": f"/eob-history/files/{file_id}/download"
-					}
-
-		# Table headers as per frontend spec
-		table_headers = [
-			{"field": "fileName", "label": "File Name"},
-			{"field": "fileType", "label": "Type"},
-			{"field": "payer", "label": "Payer"},
-			{"field": "claimId", "label": "Claim ID"},
-			{"field": "checkNumber", "label": "Check #"},
-			{"field": "patient", "label": "Patient"},
-			{"field": "date", "label": "Date", "isDate": True},
-			{"field": "status", "label": "Status"},
-			# {"label": "Actions"},
-			{"field": "actions", "label": "Actions"},
-		]
-
-		# Pagination (static for now, can be made dynamic)
-		page = 1
-		page_size = 10
-		total_records = len(files)
-		pagination = {
-			"total": total_records,
-			"page": page,
-			"page_size": page_size,
-		}
-
-		response = {
-			"message": "EOB History data fetched successfully.",
-			"tableData": {
-				"tableHeaders": table_headers,
-				"tableData": files,
-				"pagination": pagination,
-				"total_records": total_records,
-			},
-		}
-		return response
-	except Exception as e:
-		logger.error(f"Failed to fetch EOB file history: {e}")
-		raise HTTPException(status_code=500, detail="Failed to fetch EOB file history")
-
-
-# View EOB file (returns presigned S3 URL or file preview)
-@router.get("/files/{file_id}/view")
-async def view_eob_file(file_id: str, user: Dict[str, Any] = Depends(get_current_user)):
-    """
-    Returns a presigned S3 URL for viewing the EOB file (PDF or X12).
-    """
+    """Get EOB history data for current user's organization"""
     try:
+        user_id = user.get("id")
         with get_pg_conn() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute("SELECT storage_path FROM upload_files WHERE id = %s LIMIT 1", (file_id,))
+                # Get org_id for current user
+                cur.execute("SELECT org_id FROM organization_memberships WHERE user_id = %s LIMIT 1", (user_id,))
+                org = cur.fetchone()
+                if not org:
+                    raise HTTPException(status_code=404, detail="Organization not found")
+                org_id = org["org_id"]
+
+                # Fetch upload files
+                cur.execute(
+                    """
+                    SELECT uf.id::text AS id, uf.original_filename, uf.processing_status, uf.uploaded_at, p.name AS payer_name
+                    FROM upload_files uf
+                    LEFT JOIN payers p ON p.id = uf.detected_payer_id
+                    WHERE uf.org_id = %s
+                    ORDER BY uf.uploaded_at DESC
+                    LIMIT 1000
+                    """,
+                    (org_id,)
+                )
+                files = cur.fetchall()
+
+                # Fetch list of payers for this org to return for UI filters
+                cur.execute(
+                    """
+                    SELECT id::text AS id, name
+                    FROM payers
+                    WHERE org_id = %s
+                    ORDER BY name
+                    """,
+                    (org_id,)
+                )
+                payer_rows = cur.fetchall()
+                payer_list = [{"label": "All Payers", "value": "all"}] + [
+                    {"label": r.get("name") if isinstance(r, dict) else r[1], "value": r.get("name") if isinstance(r, dict) else r[1]} for r in payer_rows
+                ]
+
+        # If no files, return empty structure
+        if not files:
+            table_headers = [
+                {"field": "fileName", "label": "File Name"},
+                # {"field": "fileType", "label": "Type"},
+                {"field": "payer", "label": "Payer"},
+                {"field": "claimId", "label": "Claim ID"},
+                # {"field": "checkNumber", "label": "Check #"},
+                {"field": "patient", "label": "Patient"},
+                {"field": "date", "label": "Date", "isDate": True},
+                {"field": "status", "label": "Status"},
+                # {"label": "Actions"},
+                {"field": "actions", "label": "Actions"},
+            ]
+            return {
+                "message": "EOB History data fetched successfully.",
+                "tableData": {
+                    "tableHeaders": table_headers,
+                    "tableData": [],
+                    "pagination": {"total": 0, "page": page, "page_size": page_size},
+                    "total_records": 0,
+                },
+            }
+
+        # Query MongoDB for extraction results for these files
+        file_ids = [f["id"] for f in files]
+        mongo_docs = await db_module.db["extraction_results"].find({"fileId": {"$in": file_ids}}).to_list(length=None)
+
+        # Group extractions by fileId
+        extractions_by_file = {}
+        for d in mongo_docs:
+            fid = d.get("fileId")
+            extractions_by_file.setdefault(fid, []).append(d)
+
+        rows = []
+        for f in files:
+            fid = f["id"]
+            filename = f.get("original_filename")
+            payer_name = f.get("payer_name")
+            uploaded_at = f.get("uploaded_at")
+            file_status = f.get("processing_status")
+
+            exts = extractions_by_file.get(fid, [])
+            if exts:
+                for ext in exts:
+                    claim_id = ext.get("claimNumber") or ext.get("_id")
+                    check_num = ext.get("payment_reference") or ext.get("payment_reference") or ext.get("checkNumber")
+                    patient = ext.get("patientName") or ext.get("patient_name")
+                    ext_payer = ext.get("payerName") or payer_name
+                    ext_status = ext.get("status") or file_status
+                    # infer file type
+                    # fn_lower = (filename or "").lower()
+                    # if ".x12" in fn_lower or "835" in fn_lower:
+                    #     file_type = "835"
+                    # else:
+                    #     file_type = "EOB"
+                    date_str = None
+                    if uploaded_at:
+                        try:
+                            date_str = uploaded_at.strftime("%Y-%m-%d")
+                        except Exception:
+                            date_str = str(uploaded_at)
+
+                    rows.append({
+                        "id": str(ext.get("_id") or claim_id),
+                        "fileName": filename,
+                        # "fileType": file_type,
+                        "payer": ext_payer or "-",
+                        "claimId": claim_id or "-",
+                        # "checkNumber": check_num or "-",
+                        "patient": patient or "-",
+                        "date": date_str or "-",
+                        "status": ext_status or "-",
+                        "actions": {
+                            "view_url": f"/eob-history/files/{fid}/view",
+                            "download_url": f"/eob-history/files/{fid}/download"
+                        }
+                    })
+            else:
+                # No extraction docs, add a row with basic info
+                # fn_lower = (filename or "").lower()
+                # if ".x12" in fn_lower or "835" in fn_lower:
+                #     file_type = "835"
+                # else:
+                #     file_type = "EOB"
+                date_str = None
+                if uploaded_at:
+                    try:
+                        date_str = uploaded_at.strftime("%Y-%m-%d")
+                    except Exception:
+                        date_str = str(uploaded_at)
+                rows.append({
+                    "id": fid,
+                    "fileName": filename,
+                    # "fileType": file_type,
+                    "payer": payer_name or "-",
+                    "claimId": "-",
+                    # "checkNumber": "-",
+                    "patient": "-",
+                    "date": date_str or "-",
+                    "status": file_status or "-",
+                    "actions": {
+                        "view_url": f"/eob-history/files/{fid}/view",
+                        "download_url": f"/eob-history/files/{fid}/download"
+                    }
+                })
+
+        # Apply filters
+        filtered = []
+        s = (search or "").lower()
+        for r in rows:
+            if search:
+                hay = f"{r.get('fileName','')} {r.get('payer','')} {r.get('claimId','')} {r.get('checkNumber','')} {r.get('patient','')} {r.get('status','') }".lower()
+                if s not in hay:
+                    continue
+            if payer and payer != "all":
+                if not r.get("payer") or payer.lower() not in r.get("payer").lower():
+                    continue
+            if status and status != "all":
+                if r.get("status") != status:
+                    continue
+            # date filters are simple date string compare
+            # if date_from:
+            #     if r.get("date") < date_from:
+            #         continue
+            # if date_to:
+            #     if r.get("date") > date_to:
+            #         continue
+            filtered.append(r)
+
+        total_records = len(filtered)
+        total_pages = (total_records + page_size - 1) // page_size
+        if page > total_pages and total_pages > 0:
+            page = total_pages
+        start = (page - 1) * page_size
+        end = start + page_size
+        page_rows = filtered[start:end]
+
+        table_headers = [
+            {"field": "fileName", "label": "File Name"},
+            # {"field": "fileType", "label": "Type"},
+            {"field": "payer", "label": "Payer"},
+            {"field": "claimId", "label": "Claim ID"},
+            # {"field": "checkNumber", "label": "Check #"},
+            {"field": "patient", "label": "Patient"},
+            {"field": "date", "label": "Date", "isDate": True},
+            {"field": "status", "label": "Status"},
+            {"label": "Actions"},
+        ]
+
+        return {
+            "message": "EOB History data fetched successfully.",
+            "tableData": {
+                "tableHeaders": table_headers,
+                "tableData": page_rows,
+                "pagination": {"total": total_records, "page": page, "page_size": page_size},
+                "total_records": total_records,
+            },
+            'payer_list':payer_list,
+        }
+    except Exception as e:
+        logger.exception("Failed to fetch EOB history: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to fetch EOB history data")
+
+
+@router.get("/files/{file_id}/view")
+async def view_eob_file(file_id: str, user: Dict[str, Any] = Depends(get_current_user)):
+    """Return a presigned URL suitable for viewing the file (inline)."""
+    try:
+        user_id = user.get("id")
+        with get_pg_conn() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                # Verify user's organization
+                cur.execute("SELECT org_id FROM organization_memberships WHERE user_id = %s LIMIT 1", (user_id,))
+                org = cur.fetchone()
+                if not org:
+                    raise HTTPException(status_code=404, detail="Organization not found")
+                org_id = org["org_id"]
+
+                # Get file record
+                cur.execute("SELECT id::text AS id, storage_path, original_filename, org_id FROM upload_files WHERE id = %s LIMIT 1", (file_id,))
                 file_row = cur.fetchone()
-        if not file_row or not file_row.get("storage_path"):
-            raise HTTPException(status_code=404, detail="File not found")
-        # Generate presigned S3 URL (assume S3Service is available)
-        from app.services.s3_service import S3Service
-        from app.common.config import settings
+                if not file_row or not file_row.get("storage_path"):
+                    raise HTTPException(status_code=404, detail="File not found")
+                if file_row.get("org_id") != org_id:
+                    raise HTTPException(status_code=403, detail="Forbidden")
+
         s3_service = S3Service(
             settings.S3_BUCKET,
             settings.AWS_ACCESS_KEY_ID,
             settings.AWS_SECRET_ACCESS_KEY,
-            settings.AWS_REGION
+            settings.AWS_REGION,
         )
-        presigned_url = s3_service.generate_presigned_image_url(file_row["storage_path"])
+        presigned_url = s3_service.generate_presigned_image_url(file_row["storage_path"]) if file_row.get("storage_path") else None
+        if not presigned_url:
+            # fallback to generic presigned URL
+            presigned_url = s3_service.generate_presigned_url(file_row["storage_path"], expiration=300)
+
         if not presigned_url:
             raise HTTPException(status_code=500, detail="Failed to generate file view URL")
+
         return {"view_url": presigned_url}
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Failed to generate file view URL: {e}")
+        logger.exception("Failed to generate view URL: %s", e)
         raise HTTPException(status_code=500, detail="Failed to generate file view URL")
 
 
-# Download EOB file (returns presigned S3 download URL)
 @router.get("/files/{file_id}/download")
 async def download_eob_file(file_id: str, user: Dict[str, Any] = Depends(get_current_user)):
-    """
-    Returns a presigned S3 URL for downloading the EOB file.
-    """
+    """Return a presigned URL for downloading the file (attachment)."""
     try:
+        user_id = user.get("id")
         with get_pg_conn() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-                cur.execute("SELECT storage_path FROM upload_files WHERE id = %s LIMIT 1", (file_id,))
+                # Verify user's organization
+                cur.execute("SELECT org_id FROM organization_memberships WHERE user_id = %s LIMIT 1", (user_id,))
+                org = cur.fetchone()
+                if not org:
+                    raise HTTPException(status_code=404, detail="Organization not found")
+                org_id = org["org_id"]
+
+                # Get file record
+                cur.execute("SELECT id::text AS id, storage_path, original_filename, org_id FROM upload_files WHERE id = %s LIMIT 1", (file_id,))
                 file_row = cur.fetchone()
-        if not file_row or not file_row.get("storage_path"):
-            raise HTTPException(status_code=404, detail="File not found")
-        # Generate presigned S3 URL (assume S3Service is available)
-        from app.services.s3_service import S3Service
-        from app.common.config import settings
+                if not file_row or not file_row.get("storage_path"):
+                    raise HTTPException(status_code=404, detail="File not found")
+                if file_row.get("org_id") != org_id:
+                    raise HTTPException(status_code=403, detail="Forbidden")
+
         s3_service = S3Service(
             settings.S3_BUCKET,
             settings.AWS_ACCESS_KEY_ID,
             settings.AWS_SECRET_ACCESS_KEY,
-            settings.AWS_REGION
+            settings.AWS_REGION,
         )
-        presigned_url = s3_service.generate_presigned_image_url(file_row["storage_path"], response_content_disposition="attachment")
+        filename = file_row.get("original_filename") or "download"
+        disposition = f'attachment; filename="{filename}"'
+        presigned_url = s3_service.generate_presigned_url(file_row["storage_path"], expiration=300, response_content_disposition=disposition)
         if not presigned_url:
             raise HTTPException(status_code=500, detail="Failed to generate file download URL")
+
         return {"download_url": presigned_url}
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Failed to generate file download URL: {e}")
+        logger.exception("Failed to generate download URL: %s", e)
         raise HTTPException(status_code=500, detail="Failed to generate file download URL")
+
+

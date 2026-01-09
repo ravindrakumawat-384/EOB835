@@ -118,6 +118,9 @@ def send_invite_email(to_email: str, temp_pass, user_name: str, org_name: str, i
                             Accept Invitation
                         </a>
                     </p>
+                    <p>
+                        This link will expire in 24 hours.
+                    </p>
                     
                     <p>
                         Please find your login details below:
