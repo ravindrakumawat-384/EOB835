@@ -247,10 +247,10 @@ async def dashboard_summary(user: Dict[str, Any] = Depends(get_current_user)) ->
         successful_exports = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM exports_835 WHERE org_id = %s AND status = 'error'", (org_id,))
         failed_exports = cur.fetchone()[0]
-        # Recent uploads (PostgreSQL) with payer information
+        # Recent uploads (PostgreSQL) with payer information and MongoDB extraction data
         cur.execute("""
             SELECT uf.id, uf.original_filename, uf.uploaded_at, uf.processing_status, 
-                   p.name as payer_name, uf.ai_payer_confidence, uf.file_size
+                   p.name as payer_name, uf.ai_payer_confidence, uf.file_size, uf.reviwer_id
             FROM upload_files uf
             LEFT JOIN payers p ON uf.detected_payer_id = p.id
             WHERE uf.org_id = %s 
@@ -258,38 +258,69 @@ async def dashboard_summary(user: Dict[str, Any] = Depends(get_current_user)) ->
             LIMIT 10
         """, (org_id,))
         pg_recent = cur.fetchall()
-        # Skip MongoDB recent uploads for now (focus on PostgreSQL data)
-        def humanize(dt):
-            if not dt: return "N/A"
-            if isinstance(dt, str):
-                try:
-                    dt = dt.replace("Z", "+00:00")
-                    dt = datetime.fromisoformat(dt)
-                except Exception: return "N/A"
-            if not isinstance(dt, datetime):
-                try: dt = dt.generation_time
-                except Exception: return "N/A"
-            if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
-            diff = datetime.now(timezone.utc) - dt
-            days = diff.days
-            secs = diff.seconds
-            if days > 0: return f"{days} day{'s' if days > 1 else ''} ago"
-            hrs = secs // 3600
-            if hrs > 0: return f"{hrs} hour{'s' if hrs > 1 else ''} ago"
-            mins = (secs % 3600) // 60
-            if mins > 0: return f"{mins} minute{'s' if mins > 1 else ''} ago"
-            return "just now"
+        
+        # Fetch extraction data for recent uploads
+        recent_file_ids = [str(r[0]) for r in pg_recent] if pg_recent else []
+        extraction_data_map = {}
+        
+        if recent_file_ids:
+            try:
+                extraction_docs = await extraction_col.find(
+                    {"fileId": {"$in": recent_file_ids}}
+                ).to_list(length=None)
+                
+                for doc in extraction_docs:
+                    file_id = doc.get("fileId", "").replace("store", "")
+                    if file_id not in extraction_data_map:
+                        extraction_data_map[file_id] = []
+                    extraction_data_map[file_id].append(doc)
+            except Exception as e:
+                logger.warning(f"Failed to fetch extraction data for recent uploads: {e}")
+        
+        # Claims table headers for nested claims_data
+        claims_table_headers = [
+            {"field": "fileName", "label": "File"},
+            {"field": "payer", "label": "Payer"},
+            {"field": "status", "label": "Status"},
+            {"field": "uploaded", "label": "Uploaded", "isDate": True},
+            {
+                "label": "Actions",
+                "actions": [
+                    {"type": "view", "icon": "pi pi-eye", "roleAccess": ["admin", "reviewer", "viewer"]},
+                    {"type": "approve", "icon": "pi pi-check-circle", "roleAccess": ["admin", "reviewer"]},
+                    {"type": "reject", "icon": "pi pi-times-circle", "roleAccess": ["admin", "reviewer"]},
+                ],
+            },
+        ]
+        
         table_rows = []
         for row in pg_recent:
+            file_id = str(row[0])
+            claims_table_data = []
+            
+            # Build claims data from extraction results
+            extractions = extraction_data_map.get(file_id, [])
+            for ext in extractions:
+                claims_table_data.append({
+                    "file_id": file_id,
+                    "fileName": row[1],
+                    "payer": ext.get("payerName", row[4] or "-"),
+                    "status": ext.get("status", row[3]),
+                    "uploaded": str(row[2]),
+                    "isReviewed": ext.get("status") == "approved"
+                })
+            
             table_rows.append({
-                "fileId": str(row[0]),
+                "file_id": file_id,
                 "fileName": row[1],
                 "payer": row[4] or "-",
                 "status": row[3],
-                # "uploaded": humanize(row[1])
-                # "uploaded": covert_date_time(row[2])
+                "reviewer": row[7] or "Unassigned",
                 "uploaded": str(row[2]),
-                 "is_processing": row[3] == "ai_processing" if True else False, 
+                "claims_data": {
+                    "tableHeaders": claims_table_headers,
+                    "tableData": claims_table_data,
+                } if claims_table_data else None,
             })
         # MongoDB recent uploads removed - using PostgreSQL data only
         resp_data = {
@@ -304,15 +335,29 @@ async def dashboard_summary(user: Dict[str, Any] = Depends(get_current_user)) ->
                 # "needsTemplate": pg_needs_template,
             },
             "recentUploadsData": {
-                "total_records": 0,
                 "tableHeaders": [
-                    {"field": "fileName", "label": "File Name"},
+                    {"field": "fileName", "label": "File"},
                     {"field": "payer", "label": "Payer"},
                     {"field": "status", "label": "Status"},
                     {"field": "uploaded", "label": "Uploaded", "isDate": True},
-                    {"label": "Actions", "actions": [{"type": "view", "icon": "pi pi-eye", "styleClass": "p-button-text p-button-sm"}]}
+                    {
+                        "label": "Actions",
+                        "actions": [
+                            {
+                                "type": "generate 835",
+                                "icon": "pi pi-file-check",
+                                "roleAccess": ["admin"],
+                            }
+                        ],
+                    },
                 ],
-                "tableData": table_rows
+                "tableData": table_rows,
+                "pagination": {
+                    "total": len(table_rows),
+                    "page": 1,
+                    "page_size": 10,
+                },
+                "total_records": len(table_rows),
             }
         }
         cur.close()

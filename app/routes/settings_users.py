@@ -52,6 +52,8 @@ class UserItem(BaseModel):
 class TeamMembersTableData(BaseModel):
     tableHeaders: List[TableHeader]
     tableData: List[UserItem]
+    pagination: Optional[Dict[str, Any]] = None
+    total_records: Optional[int] = None
 
 
 class RolePermission(BaseModel):
@@ -92,8 +94,12 @@ async def serialize_usr(doc: dict, current_user_id: str) -> UserItem:
 
 
 # -------------------- GET USERS -----------------
-@router.get("", response_model=UsersResponse, )
-async def get_users(user: Dict[str, Any] = Depends(get_current_user)):
+@router.get("/", response_model=UsersResponse, )
+async def get_users(
+    user: Dict[str, Any] = Depends(get_current_user),
+    page: int = 1,
+    page_size: int = 10,
+):
     try:
         user_id = user.get("id")
         with get_pg_conn() as conn:
@@ -153,10 +159,31 @@ async def get_users(user: Dict[str, Any] = Depends(get_current_user)):
                 userCount=sum(1 for u in all_users if u and u.role == "viewer"),
             ),
         ]
+        # Calculate pagination
+        total_records = len(all_users)
+        total_pages = (total_records + page_size - 1) // page_size
+        
+        # Ensure page is within bounds
+        if page < 1:
+            page = 1
+        elif page > total_pages and total_pages > 0:
+            page = total_pages
+        
+        # Slice data for current page
+        start = (page - 1) * page_size
+        end = start + page_size
+        paginated_users = all_users[start:end]
+        
         return UsersResponse(
             teamMembersTableData=TeamMembersTableData(
                 tableHeaders=[TableHeader(**h) for h in table_headers],
-                tableData=all_users,
+                tableData=paginated_users,
+                pagination={
+                    "total": total_records,
+                    "page": page,
+                    "page_size": page_size,
+                },
+                total_records=total_records,
             ),
             rolePermissions=role_permissions,
             success="User & teams details fetched successfully",
@@ -196,20 +223,32 @@ async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(ge
                     usr = None
                 if not usr:
                     # Create new user
-                    # import uuid
                     new_user_id = str(uuid.uuid4())
                     password = hash_password("Password@123")
+                    now = datetime.now(timezone.utc)
                     cur.execute(
-                        "INSERT INTO users (id, email, full_name, password_hash, is_active, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, NOW(), NOW())",
-                        (new_user_id, payload["email"], payload.get("name", ""), password, False)
+                        "INSERT INTO users (id, email, full_name, password_hash, is_active, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                        (new_user_id, payload["email"], payload.get("name", ""), password, False, now, now)
                     )
                     add_user_id = new_user_id
 
+                    # Insert into user_profiles
+                    profile_id = str(uuid.uuid4())
+                    cur.execute(
+                        "INSERT INTO user_profiles (id, user_id, mobile, location, timezone, date_format, profile_pic_path, created_at, updated_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (profile_id, add_user_id, "1234567890", "New York", "EST", "MM/DD/YYYY", None, now, now)
+                    )
+
+                    # Insert into notification_preferences
+                    notif_id = str(uuid.uuid4())
+                    cur.execute(
+                        "INSERT INTO notification_preferences (id, user_id, upload_completed, review_required, export_ready, exceptions_detected, created_at, updated_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                        (notif_id, add_user_id, False, False, False, False, now, now)
+                    )
 
                     # Generate invite token and expiration
                     invite_token = secrets.token_urlsafe(32)
-                    # Use timezone-aware UTC datetimes so comparisons are consistent across servers
-                    created_at = datetime.now(timezone.utc)
+                    created_at = now
                     expires_at = created_at + timedelta(hours=24)  # 24 hours expiration
                     # Store invite token and expiration in refresh_tokens table
                     cur.execute(
@@ -219,10 +258,6 @@ async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(ge
 
                     # Send invite email with expiration info
                     temp_pass = "Password@123"
-                    # invite_link = f"https://your-app-url.com/invite?token={invite_token}"
-                    # email_body = f"Hello {payload.get('name', '')},\nYou have been invited to join {org_name}. Please use this link to set your password and activate your account.\n\nInvite Link: {invite_link}\nThis link will expire in 24 hours."
-                    # send_invite_email(payload["email"], temp_pass, payload.get("name", ""), org_name, email_body=email_body)
-
                     send_invite_email(payload["email"], temp_pass, payload.get("name", ""), org_name, invite_token)
                 else:
                     raise HTTPException(status_code=500, detail="User already exists. Please use a different email.")

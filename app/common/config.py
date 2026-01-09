@@ -17,14 +17,16 @@ class Settings(BaseSettings):
     POSTGRES_URL: Optional[str] = None
     MONGO_URI: str = "mongodb://eob:eob2025@112.196.42.18:27017/eob?authSource=eob"
     MONGO_DB: str = "eob"
+
     REDIS_URL: str = "redis://redis:6379/0"
     APP_NAME: str = "EOB-835"
+    REDIS_URL: str = "redis://localhost:6379/0"
 
     # JWT
     JWT_SECRET: str = Field("cc50ec6192f5f20c2931a99dd3ab22625df90527af1b56fc2d5516dff3c43e6b", env="JWT_SECRET")
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 60
 
     # Password reset token expiry (minutes)
     RESET_TOKEN_EXPIRE_MINUTES: int = 300
@@ -52,4 +54,7 @@ def get_settings():
     return Settings()
 
 settings = get_settings()
+
+
+
 
