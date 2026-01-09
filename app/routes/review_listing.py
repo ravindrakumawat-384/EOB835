@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 class UpdateReviewerRequest(BaseModel):
     file_id: str
     reviewer_id: str
-    claim_id: str
+    # claim_id: str
 
 class UpdateReviewerResponse(BaseModel):
     status: int
@@ -251,7 +251,7 @@ async def review_queue(
             mongo_query = {
                 "fileId": {"$in": mongo_file_ids},
                 "status": {
-                    "$nin": ["need_template", "assign_payer", "ocr_failed", "exception"]
+                    "$nin": ["need_template", "assign_payer", "ocr_failed"]
                 },
                 "reviewerId": {"$in": [user_id]}
             }
@@ -260,9 +260,9 @@ async def review_queue(
             mongo_query = {
                 "fileId": {"$in": mongo_file_ids},
                 "status": {
-                    "$nin": ["need_template", "assign_payer", "ocr_failed", "exception"]
+                    "$nin": ["need_template", "assign_payer", "ocr_failed"]
                 }
-        }
+            }
 
         mongo_docs = await db_module.db["extraction_results"].find(mongo_query).to_list(length=None)
 
@@ -280,7 +280,9 @@ async def review_queue(
             file_id, filename, payer_name, file_status, reviewer_id, uploaded_at = r
             extractions = extraction_map.get(file_id, [])
             claims_table_headers = [
-                {"field": "fileName", "label": "File"},
+                # {"field": "fileName", "label": "File"},
+               
+                {"field": "claim_number", "label": "Claim Number"},
                 {"field": "payer", "label": "Payer"},
                 {"field": "status", "label": "Status"},
                 {"field": "uploaded", "label": "Uploaded", "isDate": True},
@@ -303,12 +305,15 @@ async def review_queue(
                 claim_line_id = ext.get("_id", "")
                 claims_table_data.append({
                     "file_id": file_id,
-                    "fileName": ext_filename,
-                    "payer": ext_payer or payer_name or "Unknown",
+                    "claim_id": claim_line_id,
+                    # "fileName": ext_filename,
+                    "claim_number": claim_number,
+                    "payer": ext_payer or payer_name or "-",
                     "status": ext_status,
                     "uploaded": uploaded_at,
                     "confidence": conf_val,
-                    "isReviewed": ext_status == "approved"
+                    "isReviewed": ext_status in ["approved", "rejected", "exception"],
+
                 })
             # If no extractions, add a default row for ai_processing
             if file_status == "ai_processing" and not extractions:
@@ -329,7 +334,7 @@ async def review_queue(
                 "claims_data": {
                     "tableHeaders": claims_table_headers,
                     "tableData": claims_table_data,
-                } if file_status == "ai_processing" else None,
+                } if claims_table_data else None,
                 "is_processing": True if file_status == 'ai_processing' else False,
             })
         
@@ -423,33 +428,15 @@ async def update_reviewer(payload: UpdateReviewerRequest):
     conn = get_pg_conn()
     cur = conn.cursor()
     try:
-        collection = DB["extraction_results"]
-        claim_version = DB["claim_version"] 
-        
-        collection.update_one(
-            {
-                "_id": payload.claim_id,
-                "fileId": payload.file_id
-            },
-            {
-                "$set": {
-                    "reviewerId": payload.reviewer_id
-                }
-            }
+        cur.execute(
+            """
+            UPDATE upload_files
+            SET reviwer_id = %s
+            WHERE id = %s
+            """,
+            (payload.reviewer_id, payload.file_id)
         )
-
-        claim_version.update_one(
-            {
-                "extraction_id": payload.claim_id,
-                "file_id": payload.file_id
-            },
-            {
-                "$set": {
-                    "updated_by": payload.reviewer_id,
-                    "updated_at": datetime.datetime.utcnow()
-                }
-            }
-        )   
+        conn.commit()
 
         return UpdateReviewerResponse(
             status=200,
@@ -464,3 +451,4 @@ async def update_reviewer(payload: UpdateReviewerRequest):
     finally:
         cur.close()
         conn.close()
+

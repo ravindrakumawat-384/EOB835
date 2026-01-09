@@ -194,7 +194,7 @@ async def get_users(
 
 
 # -------------------- ADD USER --------------------
-@router.post("/")
+@router.post("")
 async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
     try:
         user_id = user.get("id")
@@ -287,7 +287,7 @@ async def invite_user(payload: Dict[str, Any], user: Dict[str, Any] = Depends(ge
 
 
 # -------------------- UPDATE USER --------------------
-@router.patch("/", dependencies=[Depends(require_role(["Admin"]))])
+@router.patch("", dependencies=[Depends(require_role(["Admin"]))])
 async def patch_user(payload: Dict[str, Any]):
     try:
         member_id = payload.get("userId")
@@ -309,7 +309,7 @@ async def patch_user(payload: Dict[str, Any]):
 
 
 # -------------------- DELETE USER --------------------
-@router.delete("/{member_id}")
+@router.delete("{member_id}")
 async def del_user(member_id: str, user: Dict[str, Any] = Depends(get_current_user)):
     try:
         user_id = user.get("id")

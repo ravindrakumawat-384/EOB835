@@ -1,5 +1,4 @@
-from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import BaseSettings, Field
 from functools import lru_cache
 from typing import Optional
 
@@ -16,10 +15,13 @@ class Settings(BaseSettings):
     OPENAI_MAX_TOKENS: Optional[int] = None
     MONGODB_URL: Optional[str] = None
     POSTGRES_URL: Optional[str] = None
+    MONGO_URI: str = "mongodb://eob:eob2025@112.196.42.18:27017/eob?authSource=eob"
+    MONGO_DB: str = "eob"
+    REDIS_URL: str = "redis://localhost:6379/0"
     MONGO_URI: str = "mongodb://localhost:27017"
     MONGO_DB: str = "eob_db_test"
-    REDIS_URL: str = "redis://localhost:6379/0"
     APP_NAME: str = "EOB-835"
+    REDIS_URL: str = "redis://localhost:6379/0"
 
     # JWT
     JWT_SECRET: str = Field("cc50ec6192f5f20c2931a99dd3ab22625df90527af1b56fc2d5516dff3c43e6b", env="JWT_SECRET")
@@ -38,13 +40,10 @@ class Settings(BaseSettings):
     FRONTEND_URL: Optional[str] = "http://localhost:4200"
 
     # AWS S3 Configuration
-    AWS_ACCESS_KEY_ID: Optional[str] = None
-    AWS_SECRET_ACCESS_KEY: Optional[str] = None
-    AWS_REGION: Optional[str] = None
-    S3_BUCKET: Optional[str] = None
-
-    # OpenAI Configuration
-    OPENAI_API_KEY: Optional[str] = None  
+    AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+    AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+    AWS_REGION = os.getenv("AWS_REGION")
+    S3_BUCKET = os.getenv("S3_BUCKET")
 
 
     class Config:
@@ -55,4 +54,7 @@ def get_settings():
     return Settings()
 
 settings = get_settings()
+
+
+
 
