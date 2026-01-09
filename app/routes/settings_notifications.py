@@ -45,7 +45,7 @@ async def serialize_usr(doc: dict) -> dict:
     }
 
 
-@router.get("/", response_model=Dict[str, Any])
+@router.get("", response_model=Dict[str, Any])
 async def get_notifications(user: Dict[str, Any] = Depends(get_current_user)):
 # async def get_notifications():
     try:
@@ -77,7 +77,7 @@ async def get_notifications(user: Dict[str, Any] = Depends(get_current_user)):
 
 
 
-@router.patch("/", response_model=Dict[str, Any])
+@router.patch("", response_model=Dict[str, Any])
 async def upsert_notifications(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
 # async def upsert_notifications(payload: Dict[str, Any]):
     try:

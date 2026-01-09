@@ -45,7 +45,7 @@ class UpdateProfileRequest(Dict[str, Any]):
     pass
 
 
-@router.get("/", response_model=Dict[str, Any])
+@router.get("", response_model=Dict[str, Any])
 async def get_user_profile(user: Dict[str, Any] = Depends(get_current_user)):
 # async def get_user_profile():
     """
@@ -113,7 +113,7 @@ async def get_user_profile(user: Dict[str, Any] = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail="Failed to fetch user profile")
 
 
-@router.patch("/", response_model=Dict[str, Any])
+@router.patch("", response_model=Dict[str, Any])
 async def update_user_profile(payload: Dict[str, Any], user: Dict[str, Any] = Depends(get_current_user)):
 # async def update_user_profile(payload: Dict[str, Any]):
     """
@@ -163,7 +163,7 @@ async def update_user_profile(payload: Dict[str, Any], user: Dict[str, Any] = De
 
 # GET API to return the actual uploaded profile image file
 # @router.post("/upload-profile-pic", response_model=Dict[str, Any])
-@router.get("/profile-pic")
+@router.get("")
 async def get_profile_pic(user: Dict[str, Any] = Depends(get_current_user)):
     """
     Return a presigned S3 URL for the user's profile picture, or a default placeholder if not set.
@@ -199,7 +199,7 @@ async def get_profile_pic(user: Dict[str, Any] = Depends(get_current_user)):
 # @router.patch("/upload-profile-pic", response_model=Dict[str, Any])
 # async def update_user_profile(payload: Dict[str, Any]):
 
-@router.post("/upload-profile-pic", response_model=Dict[str, Any])
+@router.post("", response_model=Dict[str, Any])
 async def upload_profile_pic(file: UploadFile = File(...), user: Dict[str, Any] = Depends(get_current_user)   ):
     """
     Upload a profile picture for the user. Accepts Angular File object, validates type/size, saves file, updates MongoDB.

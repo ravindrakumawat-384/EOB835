@@ -6,7 +6,7 @@ from ..services.auth_deps import get_current_user
 router = APIRouter(prefix="/settings/audit-logs", tags=["settings-audit-logs"])
 
 
-@router.get("/", response_model=List[Dict[str, Any]])
+@router.get("", response_model=List[Dict[str, Any]])
 async def get_logs(
     user_name: Optional[str] = None,
     category: Optional[str] = None,
