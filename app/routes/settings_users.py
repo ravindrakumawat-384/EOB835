@@ -52,6 +52,8 @@ class UserItem(BaseModel):
 class TeamMembersTableData(BaseModel):
     tableHeaders: List[TableHeader]
     tableData: List[UserItem]
+    pagination: Optional[Dict[str, Any]] = None
+    total_records: Optional[int] = None
 
 
 class RolePermission(BaseModel):
@@ -93,7 +95,11 @@ async def serialize_usr(doc: dict, current_user_id: str) -> UserItem:
 
 # -------------------- GET USERS -----------------
 @router.get("/", response_model=UsersResponse, )
-async def get_users(user: Dict[str, Any] = Depends(get_current_user)):
+async def get_users(
+    user: Dict[str, Any] = Depends(get_current_user),
+    page: int = 1,
+    page_size: int = 10,
+):
     try:
         user_id = user.get("id")
         with get_pg_conn() as conn:
@@ -153,10 +159,31 @@ async def get_users(user: Dict[str, Any] = Depends(get_current_user)):
                 userCount=sum(1 for u in all_users if u and u.role == "viewer"),
             ),
         ]
+        # Calculate pagination
+        total_records = len(all_users)
+        total_pages = (total_records + page_size - 1) // page_size
+        
+        # Ensure page is within bounds
+        if page < 1:
+            page = 1
+        elif page > total_pages and total_pages > 0:
+            page = total_pages
+        
+        # Slice data for current page
+        start = (page - 1) * page_size
+        end = start + page_size
+        paginated_users = all_users[start:end]
+        
         return UsersResponse(
             teamMembersTableData=TeamMembersTableData(
                 tableHeaders=[TableHeader(**h) for h in table_headers],
-                tableData=all_users,
+                tableData=paginated_users,
+                pagination={
+                    "total": total_records,
+                    "page": page,
+                    "page_size": page_size,
+                },
+                total_records=total_records,
             ),
             rolePermissions=role_permissions,
             success="User & teams details fetched successfully",
