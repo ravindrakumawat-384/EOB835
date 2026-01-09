@@ -144,12 +144,31 @@ async def review_queue(
             {"label": r[1], "value": r[0]} for r in reviewer_rows if r[1]
         ]
 
+        # ---------------------------
+        # STATUS OPTIONS
+        # ---------------------------
+        status_list = [
+            {"label": "All Statuses", "value": "all"},
+            {"label": "Pending Review", "value": "pending_review"},
+            {"label": "AI Processing", "value": "ai_processing"},
+            {"label": "Approved", "value": "approved"},
+            {"label": "In Review", "value": "in_review"},
+        ]
+
+        # ---------------------------
+        # CONFIDENCE OPTIONS
+        # ---------------------------
+        confidence_list = [
+            {"label": "All Confidence", "value": "all"},
+            {"label": "High (90%+)", "value": "high"},
+            {"label": "Medium (80-89%)", "value": "medium"},
+            {"label": "Low (<80%)", "value": "low"},
+        ]
+
         table_headers = [
-            {"field": "fileName", "label": "File"},
-            {"field": "payer", "label": "Payer"},
-            {"field": "claim_number", "label": "Claim Number"}, 
-            {"field": "confidence", "label": "Confidence"},
-            {"field": "status", "label": "Status"},
+            {"field": "fileName", "label": "File", "isSortable": True},
+            {"field": "payer", "label": "Payer", "isSortable": True},
+            {"field": "status", "label": "Status", "isSortable": True},
             {
                 "field": "reviewer",
                 "label": "Reviewer",
@@ -159,14 +178,14 @@ async def review_queue(
                     "options": reviewer_options,
                 },
             },
-            {"field": "uploaded", "label": "Uploaded", "isDate": True},
+            {"field": "uploaded", "label": "Uploaded", "isDate": True, "isSortable": True},
             {
                 "label": "Actions",
                 "actions": [
                     {
-                        "type": "view",
-                        "icon": "pi pi-eye",
-                        "styleClass": "p-button-text p-button-sm",
+                        "type": "generate 835",
+                        "icon": "pi pi-file-check",
+                        "roleAccess": ["admin"],
                     }
                 ],
             },
@@ -260,81 +279,112 @@ async def review_queue(
         for r in pg_rows:
             file_id, filename, payer_name, file_status, reviewer_id, uploaded_at = r
             extractions = extraction_map.get(file_id, [])
-            # Build a search string for filtering
-            search_str = f"{filename} {payer_name or ''} {file_status} {reviewer_id or ''}".lower()
-            # Handle ai_processing rows with all filters
-            if file_status == "ai_processing" and not extractions:
-                if status in ("all", "ai_processing"):
-                    # Apply search filter
-                    if search and search.lower() not in search_str:
-                        continue
-                    # Apply payer filter
-                    if payer != "all" and (not payer_name or payer.lower() not in payer_name.lower()):
-                        continue
-                    # ai_processing confidence is always 0, so filter accordingly
-                    if confidence_cat == "high":
-                        continue
-                    if confidence_cat == "medium":
-                        continue
-                    if confidence_cat == "low":
-                        pass  # 0 is < 80, so it's low
-                    table_rows.append(
-                        {
-                            "file_id": file_id,
-                            "claim_id": None,
-                            "fileName": filename,
-                            "payer": payer_name or "-",
-                            "claim_number": "-",
-                            "confidence": "0",
-                            "status": file_status,
-                            "reviewer": reviewer_id or "Unassigned",
-                            "uploaded": uploaded_at,
-                            "is_processing": True,
-                        }
-                    )
-            # Otherwise, use extraction logic as before, but filter by all filters
+            claims_table_headers = [
+                {"field": "fileName", "label": "File"},
+                {"field": "payer", "label": "Payer"},
+                {"field": "status", "label": "Status"},
+                {"field": "uploaded", "label": "Uploaded", "isDate": True},
+                {
+                    "label": "Actions",
+                    "actions": [
+                        {"type": "view", "icon": "pi pi-eye", "roleAccess": ["admin", "reviewer", "viewer"]},
+                        {"type": "approve", "icon": "pi pi-check-circle", "roleAccess": ["admin", "reviewer"]},
+                        {"type": "reject", "icon": "pi pi-times-circle", "roleAccess": ["admin", "reviewer"]},
+                    ],
+                },
+            ]
+            claims_table_data = []
             for ext in extractions:
                 ext_status = ext.get("status", "")
                 ext_payer = ext.get("payerName", "")
                 ext_filename = filename or ""
-                ext_reviewer = reviewer_id or ""
                 claim_number = ext.get("claimNumber", "N/A")
-                ext_search_str = f"{ext_filename} {ext_payer} {ext_status} {ext_reviewer} {claim_number}".lower()
-                if status != "all" and ext_status != status:
-                    continue
-                if payer != "all" and (not ext_payer or payer.lower() not in ext_payer.lower()):
-                    continue
                 conf_val = float(ext.get("aiConfidence") or 0)
-                if confidence_cat != "all":
-                    if confidence_cat == "high" and conf_val < 90:
-                        continue
-                    if confidence_cat == "medium" and not (80 <= conf_val < 90):
-                        continue
-                    if confidence_cat == "low" and conf_val >= 80:
-                        continue
-                # Apply search filter
-                if search and search.lower() not in ext_search_str:
-                    continue
                 claim_line_id = ext.get("_id", "")
-                reviewer_ids = ext.get("reviewerId", None)
-                table_rows.append(
-                    {
-                        "file_id": file_id,
-                        "claim_id": claim_line_id, 
-                        "fileName": filename,
-                        "payer": ext.get("payerName") or payer_name or "Unknown",
-                        "claim_number": claim_number or "N/A",
-                        "confidence": f"{int(conf_val)}",
-                        "status": ext_status,
-                        "reviewer": reviewer_ids or "Unassigned",
-                        "uploaded": uploaded_at,
-                    }
-                )
+                claims_table_data.append({
+                    "file_id": file_id,
+                    "fileName": ext_filename,
+                    "payer": ext_payer or payer_name or "Unknown",
+                    "status": ext_status,
+                    "uploaded": uploaded_at,
+                    "confidence": conf_val,
+                    "isReviewed": ext_status == "approved"
+                })
+            # If no extractions, add a default row for ai_processing
+            if file_status == "ai_processing" and not extractions:
+                claims_table_data.append({
+                    "file_id": file_id,
+                    "fileName": filename,
+                    "payer": payer_name or "-",
+                    "status": file_status,
+                    "uploaded": uploaded_at,
+                })
+            table_rows.append({
+                "file_id": file_id,
+                "fileName": filename,
+                "payer": payer_name or "-",
+                "status": file_status,
+                "reviewer": reviewer_id or "Unassigned",
+                "uploaded": uploaded_at,
+                "claims_data": {
+                    "tableHeaders": claims_table_headers,
+                    "tableData": claims_table_data,
+                } if file_status == "ai_processing" else None,
+                "is_processing": True if file_status == 'ai_processing' else False,
+            })
+        
         # ---------------------------
-        # ✅ FIXED PAGINATION (ONLY CHANGE)
+        # APPLY FILTERS
         # ---------------------------
-        # Show only 'pending_review' count in total_records
-        total_records = sum(1 for row in table_rows if row.get('status') == 'pending_review')
+        filtered_rows = []
+        for row in table_rows:
+            # Search filter - search in fileName, payer, and claims data
+            if search:
+                search_lower = search.lower()
+                search_str = f"{row['fileName']} {row['payer']}".lower()
+                
+                # Also search in claims data if available
+                if row.get('claims_data') and row['claims_data'].get('tableData'):
+                    for claim in row['claims_data']['tableData']:
+                        search_str += f" {claim.get('fileName', '')} {claim.get('payer', '')} {claim.get('status', '')}".lower()
+                
+                if search_lower not in search_str:
+                    continue
+            
+            # Payer filter
+            if payer != "all":
+                if payer.lower() not in row['payer'].lower():
+                    continue
+            
+            # Status filter
+            if status != "all":
+                if row['status'] != status:
+                    continue
+            
+            # Confidence filter - check claims data for confidence values
+            if confidence_cat != "all":
+                has_matching_confidence = False
+                if row.get('claims_data') and row['claims_data'].get('tableData'):
+                    for claim in row['claims_data']['tableData']:
+                        conf_val = claim.get('confidence', 0)
+                        if confidence_cat == "high" and conf_val >= 90:
+                            has_matching_confidence = True
+                            break
+                        elif confidence_cat == "medium" and 80 <= conf_val < 90:
+                            has_matching_confidence = True
+                            break
+                        elif confidence_cat == "low" and conf_val < 80:
+                            has_matching_confidence = True
+                            break
+                if not has_matching_confidence:
+                    continue
+            
+            filtered_rows.append(row)
+        
+        # ---------------------------
+        # PAGINATION
+        # ---------------------------
+        total_records = len(filtered_rows)
 
         total_pages = (total_records + page_size - 1) // page_size
         if page > total_pages and total_pages > 0:
@@ -342,7 +392,7 @@ async def review_queue(
 
         start = (page - 1) * page_size
         end = start + page_size
-        paginated_rows = table_rows[start:end]
+        paginated_rows = filtered_rows[start:end]
 
         return {
             "message": "Review queue data fetched successfully.",
@@ -356,7 +406,9 @@ async def review_queue(
                 },
                 "total_records": total_records,
             },
-            "payer_list": payer_list
+            "payer_list": payer_list,
+            "status_list": status_list,
+            "confidence_list": confidence_list,
         }
 
     except Exception:
