@@ -35,7 +35,7 @@ class Settings(BaseSettings):
 
     # Frontend URL used to build password reset links. Override in .env
     # FRONTEND_URL: Optional[str] = "http://localhost:4200"
-    FRONTEND_URL_LIVE: Optional[str] = "https://eob-fe.ditstekcloud.com/"
+    FRONTEND_URL_LIVE: Optional[str] = "https://eob-fe.ditstekcloud.com"
 
     # AWS S3 Configuration
     AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
