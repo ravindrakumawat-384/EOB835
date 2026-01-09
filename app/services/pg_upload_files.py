@@ -11,7 +11,7 @@ def get_pg_conn():
         dbname="eob",
         user="eob",
         password="eob2025",
-        host="127.0.0.1",
+        host="112.196.42.18",
         port="5432"
     )
 
