@@ -19,8 +19,8 @@ async def get_eob_history(
     search: Optional[str] = Query(None),
     payer: Optional[str] = Query("all"),
     status: Optional[str] = Query("all"),
-    # date_from: Optional[str] = Query(None),
-    # date_to: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query("date"),
+    sort_dir: Optional[str] = Query("desc"),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=1000),
 ):
@@ -68,15 +68,11 @@ async def get_eob_history(
         # If no files, return empty structure
         if not files:
             table_headers = [
-                {"field": "fileName", "label": "File Name"},
-                # {"field": "fileType", "label": "Type"},
-                {"field": "payer", "label": "Payer"},
-                {"field": "claimId", "label": "Claim ID"},
-                # {"field": "checkNumber", "label": "Check #"},
-                {"field": "patient", "label": "Patient"},
-                {"field": "date", "label": "Date", "isDate": True},
-                {"field": "status", "label": "Status"},
-                # {"label": "Actions"},
+                {"field": "fileName", "label": "File Name", "isSortable": True},
+                {"field": "payer", "label": "Payer", "isSortable": True},
+                {"field": "claimCount", "label": "Claims", "isSortable": True},
+                {"field": "date", "label": "Date", "isDate": True, "isSortable": True},
+                {"field": "status", "label": "Status", "isSortable": True},
                 {"field": "actions", "label": "Actions"},
             ]
             return {
@@ -108,76 +104,42 @@ async def get_eob_history(
             file_status = f.get("processing_status")
 
             exts = extractions_by_file.get(fid, [])
-            if exts:
-                for ext in exts:
-                    claim_id = ext.get("claimNumber") or ext.get("_id")
-                    check_num = ext.get("payment_reference") or ext.get("payment_reference") or ext.get("checkNumber")
-                    patient = ext.get("patientName") or ext.get("patient_name")
-                    ext_payer = ext.get("payerName") or payer_name
-                    ext_status = ext.get("status") or file_status
-                    # infer file type
-                    # fn_lower = (filename or "").lower()
-                    # if ".x12" in fn_lower or "835" in fn_lower:
-                    #     file_type = "835"
-                    # else:
-                    #     file_type = "EOB"
-                    date_str = None
-                    if uploaded_at:
-                        try:
-                            date_str = uploaded_at.strftime("%Y-%m-%d")
-                        except Exception:
-                            date_str = str(uploaded_at)
+            
+            # Get first extraction data for display (file level)
+            claim_count = len(exts)
+            first_ext = exts[0] if exts else None
+            
+            ext_payer = first_ext.get("payerName") if first_ext else payer_name
+            ext_status = first_ext.get("status") if first_ext else file_status
+            patient = first_ext.get("patientName") or first_ext.get("patient_name") if first_ext else None
+            
+            date_str = None
+            if uploaded_at:
+                try:
+                    date_str = uploaded_at.strftime("%Y-%m-%d")
+                except Exception:
+                    date_str = str(uploaded_at)
 
-                    rows.append({
-                        "id": str(ext.get("_id") or claim_id),
-                        "fileName": filename,
-                        # "fileType": file_type,
-                        "payer": ext_payer or "-",
-                        "claimId": claim_id or "-",
-                        # "checkNumber": check_num or "-",
-                        "patient": patient or "-",
-                        "date": date_str or "-",
-                        "status": ext_status or "-",
-                        "actions": {
-                            "view_url": f"/eob-history/files/{fid}/view",
-                            "download_url": f"/eob-history/files/{fid}/download"
-                        }
-                    })
-            else:
-                # No extraction docs, add a row with basic info
-                # fn_lower = (filename or "").lower()
-                # if ".x12" in fn_lower or "835" in fn_lower:
-                #     file_type = "835"
-                # else:
-                #     file_type = "EOB"
-                date_str = None
-                if uploaded_at:
-                    try:
-                        date_str = uploaded_at.strftime("%Y-%m-%d")
-                    except Exception:
-                        date_str = str(uploaded_at)
-                rows.append({
-                    "id": fid,
-                    "fileName": filename,
-                    # "fileType": file_type,
-                    "payer": payer_name or "-",
-                    "claimId": "-",
-                    # "checkNumber": "-",
-                    "patient": "-",
-                    "date": date_str or "-",
-                    "status": file_status or "-",
-                    "actions": {
-                        "view_url": f"/eob-history/files/{fid}/view",
-                        "download_url": f"/eob-history/files/{fid}/download"
-                    }
-                })
+            rows.append({
+                "id": fid,
+                "fileName": filename,
+                "payer": ext_payer or payer_name or "-",
+                "claimCount": claim_count,
+                "date": date_str or "-",
+                "uploaded_at": uploaded_at,  # Keep original for sorting
+                "status": ext_status or file_status or "-",
+                "actions": {
+                    "view_url": f"/eob-history/files/{fid}/view",
+                    "download_url": f"/eob-history/files/{fid}/download"
+                }
+            })
 
         # Apply filters
         filtered = []
         s = (search or "").lower()
         for r in rows:
             if search:
-                hay = f"{r.get('fileName','')} {r.get('payer','')} {r.get('claimId','')} {r.get('checkNumber','')} {r.get('patient','')} {r.get('status','') }".lower()
+                hay = f"{r.get('fileName','')} {r.get('payer','')} {r.get('status','')}".lower()
                 if s not in hay:
                     continue
             if payer and payer != "all":
@@ -186,14 +148,45 @@ async def get_eob_history(
             if status and status != "all":
                 if r.get("status") != status:
                     continue
-            # date filters are simple date string compare
-            # if date_from:
-            #     if r.get("date") < date_from:
-            #         continue
-            # if date_to:
-            #     if r.get("date") > date_to:
-            #         continue
             filtered.append(r)
+
+        # Apply sorting
+        valid_sort_fields = ["fileName", "payer", "claimCount", "date", "status"]
+        print(f"DEBUG: sort_by={sort_by}, sort_dir={sort_dir}, valid={sort_by in valid_sort_fields}")
+        if sort_by in valid_sort_fields:
+            reverse = sort_dir.lower() == "desc"
+            print(f"DEBUG: Sorting by {sort_by}, reverse={reverse}")
+            if sort_by == "date":
+                filtered.sort(
+                    key=lambda x: x.get("uploaded_at") or datetime(1900, 1, 1),
+                    reverse=reverse
+                )
+            elif sort_by == "claimCount":
+                filtered.sort(
+                    key=lambda x: x.get("claimCount", 0),
+                    reverse=reverse
+                )
+            elif sort_by == "status":
+                status_priority = {
+                    "pending_review": 1,
+                    "ai_processing": 2,
+                    "in_review": 3,
+                    "approved": 4,
+                    "rejected": 5,
+                    "failed": 6,
+                }
+                filtered.sort(
+                    key=lambda x: (
+                        status_priority.get(x.get("status", ""), 99),
+                        (x.get("status") or "").lower()
+                    ),
+                    reverse=reverse
+                )
+            else:
+                filtered.sort(
+                    key=lambda x: (x.get(sort_by) or "").lower(),
+                    reverse=reverse
+                )
 
         total_records = len(filtered)
         total_pages = (total_records + page_size - 1) // page_size
@@ -204,14 +197,11 @@ async def get_eob_history(
         page_rows = filtered[start:end]
 
         table_headers = [
-            {"field": "fileName", "label": "File Name"},
-            # {"field": "fileType", "label": "Type"},
-            {"field": "payer", "label": "Payer"},
-            {"field": "claimId", "label": "Claim ID"},
-            # {"field": "checkNumber", "label": "Check #"},
-            {"field": "patient", "label": "Patient"},
-            {"field": "date", "label": "Date", "isDate": True},
-            {"field": "status", "label": "Status"},
+            {"field": "fileName", "label": "File Name", "isSortable": True},
+            {"field": "payer", "label": "Payer", "isSortable": True},
+            {"field": "claimCount", "label": "Claims", "isSortable": True},
+            {"field": "date", "label": "Date", "isDate": True, "isSortable": True},
+            {"field": "status", "label": "Status", "isSortable": False},
             {"label": "Actions"},
         ]
 

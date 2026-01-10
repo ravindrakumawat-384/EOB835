@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import psycopg2
 import json
 from app.common.db.db import init_db
@@ -18,7 +18,7 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/claims", tags=["claims"])
 
-@router.get("/claim_details/")
+@router.get("/claim_details")
 async def get_claims_detail(claim_id: str, user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
     """
     Get the claim details with the given claim ID and database uses for this mongodb and PostgreSQL.
@@ -123,6 +123,7 @@ def apply_user_updates(claim: Dict[str, Any], updates: Dict[str, Any]) -> Dict[s
     """
     Accepts ANY JSON shape.
     Extracts all leaf keys and updates matching claim.fields[].field values.
+    Syncs service_line_details data to service_lines array inside service_line_details section.
     """
 
     if not claim or not updates:
@@ -130,18 +131,71 @@ def apply_user_updates(claim: Dict[str, Any], updates: Dict[str, Any]) -> Dict[s
 
     flat_updates: Dict[str, Any] = {}
     flatten_updates(updates, flat_updates)
-
-    for section in claim.get("sections", []):
-        for field_obj in section.get("fields", []):
-            field_key = field_obj.get("field")
-            if field_key in flat_updates:
-                field_obj["value"] = flat_updates[field_key]
+    
+    sections = claim.get("sections", [])
+    
+    # Find service_line_details section
+    service_line_details_section = None
+    for section in sections:
+        if isinstance(section, dict) and section.get("dataKey") == "service_line_details":
+            service_line_details_section = section
+            break
+    
+    # Update fields in sections
+    for section in sections:
+        if isinstance(section, dict) and "fields" in section:
+            for field_obj in section.get("fields", []):
+                field_key = field_obj.get("field")
+                if field_key in flat_updates:
+                    field_obj["value"] = flat_updates[field_key]
+    
+    # Process service_line_details from updates payload
+    service_line_details = updates.get("service_line_details", [])
+    if isinstance(service_line_details, list) and service_line_details and service_line_details_section:
+        # Ensure service_lines key exists in service_line_details section
+        if "service_lines" not in service_line_details_section:
+            service_line_details_section["service_lines"] = []
+        
+        existing_lines = service_line_details_section.get("service_lines", [])
+        
+        for service_line_data in service_line_details:
+            if not isinstance(service_line_data, dict):
+                continue
+                
+            # Get unique identifiers
+            line_ctrl_nmbr = service_line_data.get("line_ctrl_nmbr")
+            procedure_code = service_line_data.get("procedure_code")
+            dates_of_service = service_line_data.get("dates_of_service")
+            
+            # Find matching existing line
+            matched = False
+            for existing_line in existing_lines:
+                # Convert to string for comparison to handle type differences
+                existing_ctrl = str(existing_line.get("line_ctrl_nmbr", ""))
+                incoming_ctrl = str(line_ctrl_nmbr) if line_ctrl_nmbr else ""
+                
+                if (existing_ctrl == incoming_ctrl and
+                    existing_line.get("procedure_code") == procedure_code and
+                    existing_line.get("dates_of_service") == dates_of_service):
+                    # Update existing line with changed keys
+                    for key, value in service_line_data.items():
+                        existing_line[key] = value
+                    matched = True
+                    break
+            
+            # Append new if not exists
+            if not matched:
+                existing_lines.append(service_line_data)
+        
+        service_line_details_section["service_lines"] = existing_lines
+    
+    claim["sections"] = sections
 
     return claim
 
 
 @router.post("/save_claims_data")
-async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: str, check: str, user: Dict[str, Any] = Depends(get_current_user)):
+async def save_claims_data(claim_json: Optional[Dict[str, Any]], file_id: str, claim_id: str, check: str, user: Dict[str, Any] = Depends(get_current_user)):
     try:
         version_collection = DB["claim_version"]
         extraction_collection = DB["extraction_results"]
@@ -172,14 +226,14 @@ async def save_claims_data(claim_json: Dict[str, Any], file_id: str, claim_id: s
             # Update extraction status to 'exception' in extraction_results collection
             await extraction_collection.update_one(
                 {"_id": claim_id},
-                {"$set": {"status": "exception"}}
+                {"$set": {"status": "rejected"}}
             )
 
             await version_collection.update_one(
                 {"extraction_id": claim_id},
-                {"$set": {"status": "exception"}}
+                {"$set": {"status": "rejected"}}
             )
-            return {"message": "Claim marked as exception successfully.", "status": 200}  
+            return {"message": "Claim marked as rejected successfully.", "status": 200}  
          
         # Handle draft case
 
