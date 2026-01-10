@@ -44,7 +44,9 @@ async def dashboard_summary(user: Dict[str, Any] = Depends(get_current_user)) ->
         cur.execute("""SELECT org_id, role FROM organization_memberships WHERE user_id = %s LIMIT 1
                 """, (user_id,))
         membership = cur.fetchone()
+        print("membership==================", membership)
         org_id = membership[0]
+        user_role = membership[1]
         if not org_id:
             raise HTTPException(status_code=400, detail="org_id required in user context")
         # MongoDB stats for accuracy from extraction_results collection
@@ -248,15 +250,28 @@ async def dashboard_summary(user: Dict[str, Any] = Depends(get_current_user)) ->
         cur.execute("SELECT COUNT(*) FROM exports_835 WHERE org_id = %s AND status = 'error'", (org_id,))
         failed_exports = cur.fetchone()[0]
         # Recent uploads (PostgreSQL) with payer information and MongoDB extraction data
-        cur.execute("""
-            SELECT uf.id, uf.original_filename, uf.uploaded_at, uf.processing_status, 
+        role = user_role.lower()
+        if role == "reviewer":
+            cur.execute("""
+                SELECT uf.id, uf.original_filename, uf.uploaded_at, uf.processing_status, 
                    p.name as payer_name, uf.ai_payer_confidence, uf.file_size, uf.reviwer_id
-            FROM upload_files uf
-            LEFT JOIN payers p ON uf.detected_payer_id = p.id
-            WHERE uf.org_id = %s 
-            ORDER BY uf.uploaded_at DESC 
-            LIMIT 10
-        """, (org_id,))
+                FROM upload_files uf
+                LEFT JOIN payers p ON uf.detected_payer_id = p.id
+                WHERE uf.org_id = %s 
+                AND uf.reviwer_id = %s
+                ORDER BY uf.uploaded_at DESC 
+                LIMIT 10
+            """, (org_id, user_id))
+        else:
+            cur.execute("""
+                SELECT uf.id, uf.original_filename, uf.uploaded_at, uf.processing_status, 
+                   p.name as payer_name, uf.ai_payer_confidence, uf.file_size, uf.reviwer_id
+                FROM upload_files uf
+                LEFT JOIN payers p ON uf.detected_payer_id = p.id
+                WHERE uf.org_id = %s 
+                ORDER BY uf.uploaded_at DESC 
+                LIMIT 10
+            """, (org_id,))
         pg_recent = cur.fetchall()
         
         # Fetch extraction data for recent uploads
@@ -279,16 +294,16 @@ async def dashboard_summary(user: Dict[str, Any] = Depends(get_current_user)) ->
         
         # Claims table headers for nested claims_data
         claims_table_headers = [
-            {"field": "fileName", "label": "File"},
+            # {"field": "fileName", "label": "File"},
+            {"field": "claim_number", "label": "Claim Number"},
             {"field": "payer", "label": "Payer"},
             {"field": "status", "label": "Status"},
             {"field": "uploaded", "label": "Uploaded", "isDate": True},
             {
                 "label": "Actions",
                 "actions": [
-                    {"type": "view", "icon": "pi pi-eye", "roleAccess": ["admin", "reviewer", "viewer"]},
-                    {"type": "approve", "icon": "pi pi-check-circle", "roleAccess": ["admin", "reviewer"]},
-                    {"type": "reject", "icon": "pi pi-times-circle", "roleAccess": ["admin", "reviewer"]},
+                    {"type": "view", "icon": "pi pi-eye", "roleAccess": ["admin", "reviewer", "viewer"]}
+                   
                 ],
             },
         ]
@@ -303,20 +318,31 @@ async def dashboard_summary(user: Dict[str, Any] = Depends(get_current_user)) ->
             for ext in extractions:
                 claims_table_data.append({
                     "file_id": file_id,
-                    "fileName": row[1],
+                    "claim_id": ext.get("_id"),    
+                    # "fileName": row[1],
+                    "claim_number": ext.get("claimNumber", "-"),
                     "payer": ext.get("payerName", row[4] or "-"),
                     "status": ext.get("status", row[3]),
                     "uploaded": str(row[2]),
-                    "isReviewed": ext.get("status") == "approved"
+                    "isReviewed": ext.get("status") in ["approved", "rejected", "exception"]
                 })
+            
+            # Calculate average aiConfidence for this file
+            file_accuracy = 0.0
+            if extractions:
+                confidence_values = [ext.get("aiConfidence", 0) or 0 for ext in extractions]
+                if confidence_values:
+                    file_accuracy = round(sum(confidence_values) / len(confidence_values), 1)
             
             table_rows.append({
                 "file_id": file_id,
                 "fileName": row[1],
                 "payer": row[4] or "-",
+                "accuracy": f"{file_accuracy}%",
                 "status": row[3],
                 "reviewer": row[7] or "Unassigned",
                 "uploaded": str(row[2]),
+                "is_processing": row[3] == "ai_processing" if True else False,
                 "claims_data": {
                     "tableHeaders": claims_table_headers,
                     "tableData": claims_table_data,
@@ -338,18 +364,10 @@ async def dashboard_summary(user: Dict[str, Any] = Depends(get_current_user)) ->
                 "tableHeaders": [
                     {"field": "fileName", "label": "File"},
                     {"field": "payer", "label": "Payer"},
+                    {"field": "accuracy", "label": "Accuracy"},
                     {"field": "status", "label": "Status"},
                     {"field": "uploaded", "label": "Uploaded", "isDate": True},
-                    {
-                        "label": "Actions",
-                        "actions": [
-                            {
-                                "type": "generate 835",
-                                "icon": "pi pi-file-check",
-                                "roleAccess": ["admin"],
-                            }
-                        ],
-                    },
+                   
                 ],
                 "tableData": table_rows,
                 "pagination": {

@@ -12,7 +12,7 @@ logger = get_logger(__name__)
 DB = init_db() 
 
 payer_ids = ''
-def extract_and_save_payer_data(json_data: dict, org_id: str, filename: str = None) -> Optional[str]:
+def extract_and_save_payer_data(dynamic_keys: dict, org_id: str, filename: str = None, payer_name: str = None, user_id: str = None) -> Optional[str]:
     """
     Extract payer information from template JSON data and save to payer table.
     
@@ -24,124 +24,18 @@ def extract_and_save_payer_data(json_data: dict, org_id: str, filename: str = No
     Returns:
         payer_id if created/found, None if no payer data found
     """
+    print("under payer create function")
     conn = get_pg_conn()
     cur = conn.cursor()
     
     try:
-        # Common payer name fields to look for in JSON
-        payer_name_fields = [
-            'payer_name', 'payer', 'insurance_company', 'insurer', 'carrier',
-            'insurance_carrier', 'plan_name', 'health_plan', 'insurance_plan',
-            'company_name', 'organization_name', 'insurance_name'
-        ]
-        
-        payer_name = None
         payer_code = None
-        
-        # Extract payer name from JSON data (case-insensitive search)
-        for field in payer_name_fields:
-            # Check exact match
-            if field in json_data and json_data[field]:
-                payer_name = str(json_data[field]).strip()
-                break
-            
-            # Check case-insensitive match
-            for key, value in json_data.items():
-                if isinstance(key, str) and key.lower() == field.lower():
-                    if value and str(value).strip():
-                        payer_name = str(value).strip()
-                        break
-            
-            if payer_name:
-                break
-        
-        # If no direct payer name found, try to extract from nested structures
-        if not payer_name:
-            # Check claims array for payer information
-            if 'claims' in json_data and isinstance(json_data['claims'], list):
-                for claim in json_data['claims'][:3]:  # Check first 3 claims
-                    if isinstance(claim, dict):
-                        for field in payer_name_fields:
-                            if field in claim and claim[field]:
-                                payer_name = str(claim[field]).strip()
-                                break
-                        if payer_name:
-                            break
-            
-            # Check payments array for payer information
-            if not payer_name and 'payments' in json_data and isinstance(json_data['payments'], list):
-                for payment in json_data['payments'][:3]:  # Check first 3 payments
-                    if isinstance(payment, dict):
-                        for field in payer_name_fields:
-                            if field in payment and payment[field]:
-                                payer_name = str(payment[field]).strip()
-                                break
-                        if payer_name:
-                            break
-            
-            # Check raw_key_value_pairs for payer information
-            if not payer_name and 'raw_key_value_pairs' in json_data:
-                raw_data = json_data['raw_key_value_pairs']
-                if isinstance(raw_data, dict):
-                    for field in payer_name_fields:
-                        if field in raw_data and raw_data[field]:
-                            payer_name = str(raw_data[field]).strip()
-                            break
-        
-        # Look for payer code fields
-        payer_code_fields = ['payer_code', 'payer_id', 'plan_code', 'carrier_code', 'insurance_id']
-        for field in payer_code_fields:
-            if field in json_data and json_data[field]:
-                payer_code = str(json_data[field]).strip()
-                break
-            
-            # Check case-insensitive match
-            for key, value in json_data.items():
-                if isinstance(key, str) and key.lower() == field.lower():
-                    if value and str(value).strip():
-                        payer_code = str(value).strip()
-                        break
-            
-            if payer_code:
-                break
-        
-        # If no payer name found in JSON, try to extract from filename
-        if not payer_name and filename:
-            # Common payer names/patterns in filenames
-            filename_payer_patterns = {
-                'bcbs': 'Blue Cross Blue Shield',
-                'bluecross': 'Blue Cross Blue Shield', 
-                'blueshield': 'Blue Cross Blue Shield',
-                'uhc': 'UnitedHealthcare',
-                'united': 'UnitedHealthcare',
-                'unitedhealthcare': 'UnitedHealthcare',
-                'aetna': 'Aetna',
-                'cigna': 'Cigna',
-                'humana': 'Humana',
-                'anthem': 'Anthem',
-                'kaiser': 'Kaiser Permanente',
-                'fallon': 'Fallon Health',
-                'regence': 'Regence',
-                'regenceblueshield': 'Regence BlueCross BlueShield'
-            }
-            
-            filename_lower = filename.lower()
-            for pattern, payer in filename_payer_patterns.items():
-                if pattern in filename_lower:
-                    payer_name = payer
-                    logger.info(f"Extracted payer name from filename: {payer_name}")
-                    break
-        
-        # If still no payer name found, return None
-        if not payer_name:
-            logger.info("No payer name found in template JSON data or filename")
-            return None
         
         # Check if payer already exists
         cur.execute("""
             SELECT id FROM payers 
-            WHERE org_id = %s AND (name = %s OR (payer_code IS NOT NULL AND payer_code = %s))
-        """, (org_id, payer_name, payer_code))
+            WHERE org_id = %s AND (name = %s OR (payer_code IS NOT NULL))
+        """, (org_id, payer_name))
         
         existing_payer = cur.fetchone()
         if existing_payer:
@@ -150,19 +44,7 @@ def extract_and_save_payer_data(json_data: dict, org_id: str, filename: str = No
         
         # Create new payer
         payer_id = str(uuid.uuid4())
-        created_by = "9f44298b-5e30-4a7c-a8cb-1ae003cd9134"  # Default user
-        
-        # Create AI detection metadata from the JSON data
-        ai_detection_metadata = {
-            "source": "template_json_extraction",
-            "confidence": 85,
-            "detected_fields": {
-                "payer_name": payer_name,
-                "payer_code": payer_code
-            },
-            "extraction_timestamp": datetime.utcnow().isoformat(),
-            "template_fields_used": [key for key in json_data.keys() if any(field in key.lower() for field in payer_name_fields + payer_code_fields)]
-        }
+        created_by = user_id  # Default user
         
         cur.execute("""
             INSERT INTO payers (
@@ -173,7 +55,7 @@ def extract_and_save_payer_data(json_data: dict, org_id: str, filename: str = No
             org_id,
             payer_name,
             payer_code,
-            json.dumps(ai_detection_metadata),
+            None,
             created_by,
             datetime.utcnow(),
             datetime.utcnow()
@@ -205,7 +87,7 @@ def create_template_in_postgres(
     name: str,
     filename: str,
     # template_path: str,
-    org_id: str = "9ac493f7-cc6a-4d7d-8646-affb00ed58da",
+    org_id: str,
     payer_id: str = payer_ids,  # Default payer_id
     template_type: str = "other",
     template_path: str = None,
@@ -257,8 +139,9 @@ def create_template_version(
     template_id: str,
     dynamic_keys: List[str],
     mongo_doc_id: str,
+    user_id: str,
     ai_model_name: str = "gpt-4o-mini",
-    notes: str = "Auto-generated from file upload"
+    notes: str = "Auto-generated from file upload",
 ) -> str:
     """
     Create a new template version in the template_versions table.
@@ -270,7 +153,7 @@ def create_template_version(
     
     try:
         version_id = str(uuid.uuid4())
-        created_by = "9f44298b-5e30-4a7c-a8cb-1ae003cd9134"  # Default user
+        created_by = user_id
         
         # Get next version number
         cur.execute("""
@@ -279,7 +162,7 @@ def create_template_version(
             WHERE template_id = %s
         """, (template_id,))
         
-        version_number = cur.fetchone()[0]
+        version_number = '1'
         
         # Extract flat key names from sections structure for notes
         flat_key_names = []
@@ -297,8 +180,8 @@ def create_template_version(
         
         cur.execute("""
             INSERT INTO template_versions (
-                id, template_id, version_number, status, ai_generated, ai_model_name, mongo_doc_id, notes, created_by, created_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                id, template_id, version_number, status, ai_generated, ai_model_name, mongo_doc_id, notes, created_by, created_at, template_json
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             version_id,
             template_id,
@@ -309,7 +192,8 @@ def create_template_version(
             mongo_doc_id,
             f"{notes}. Dynamic keys: {keys_str}",
             created_by,
-            datetime.utcnow()
+            datetime.utcnow(),
+            json.dumps(dynamic_keys)  # Serialize to JSON string for PostgreSQL
         ))
         
         # Update template to point to this version
@@ -339,7 +223,9 @@ def save_template_data(
     dynamic_keys: List[str],
     file_size: int,
     mime_type: str,
+    user_id: str,
     ai_confidence: int = 85,
+    
 ) -> dict:
     """Save template processing results to database using existing schema."""
     
@@ -358,14 +244,14 @@ def save_template_data(
             "template_id": template_id,
             "filename": filename,
             "raw_text": raw_text[:10000],  # Limit size for MongoDB
-            "extracted_data": json_data,
+            # "extracted_data": json_data,
             "dynamic_keys": dynamic_keys,
             "ai_confidence": ai_confidence,
-            "file_metadata": {
-                "size": file_size,
-                "mime_type": mime_type,
-                "processing_method": "ai_dynamic_extraction"
-            },
+            # "file_metadata": {
+            #     "size": file_size,
+            #     "mime_type": mime_type,
+            #     "processing_method": "ai_dynamic_extraction"
+            # },
             "status": "approved",
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow()
@@ -379,7 +265,8 @@ def save_template_data(
             template_id=template_id,
             dynamic_keys=dynamic_keys,
             mongo_doc_id=mongo_doc_id,
-            ai_model_name="gpt-4o-mini",
+            user_id=user_id,
+            ai_model_name="gpt-5.2",
             notes=f"Generated from {filename}"
         )
         
@@ -402,7 +289,7 @@ def save_template_data(
         logger.info(f"✅ Saved template data using existing schema: {result}")
         
         # Extract and save payer data from template JSON
-        extract_and_save_payer_data(json_data, org_id="9ac493f7-cc6a-4d7d-8646-affb00ed58da", filename=filename)
+        # extract_and_save_payer_data(json_data, org_id="9ac493f7-cc6a-4d7d-8646-affb00ed58da", filename=filename)
         
         return result
         

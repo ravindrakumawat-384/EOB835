@@ -78,6 +78,8 @@ async def review_queue(
     payer: Optional[str] = Query("all"),
     status: Optional[str] = Query("all"),
     confidence_cat: Optional[str] = Query("all"),
+    sort_by: Optional[str] = Query("uploaded"),
+    sort_dir: Optional[str] = Query("desc"),
     page: int = Query(1, ge=1),
     page_size: int = Query(6, ge=1, le=1000),
 ):
@@ -194,7 +196,7 @@ async def review_queue(
         # ---------------------------
         # POSTGRES (NO PAGINATION HERE)
         # ---------------------------
-        where = ["uf.org_id = %s"]
+        where = ["uf.org_id = %s", "uf.processing_status != 'failed'"]
         params = [org_id]
 
         # Remove status filter from SQL; will filter on extraction_results below
@@ -221,6 +223,7 @@ async def review_queue(
             LEFT JOIN payers p ON p.id = uf.detected_payer_id
             LEFT JOIN users u ON u.id = uf.uploaded_by
             WHERE {where_sql}
+         
             ORDER BY uf.uploaded_at DESC
             """,
             params,
@@ -385,6 +388,40 @@ async def review_queue(
                     continue
             
             filtered_rows.append(row)
+        
+        # ---------------------------
+        # SORTING
+        # ---------------------------
+        valid_sort_fields = ["fileName", "payer", "status", "uploaded"]
+        if sort_by in valid_sort_fields:
+            reverse = sort_dir.lower() == "desc"
+            if sort_by == "uploaded":
+                filtered_rows.sort(
+                    key=lambda x: x.get(sort_by) or datetime.datetime.min,
+                    reverse=reverse
+                )
+            elif sort_by == "status":
+                # Priority order for status: pending_review (1), ai_processing (2), others (3+)
+                status_priority = {
+                    "pending_review": 1,
+                    "ai_processing": 2,
+                    "in_review": 3,
+                    "approved": 4,
+                    "rejected": 5,
+                    "exception": 6,
+                }
+                filtered_rows.sort(
+                    key=lambda x: (
+                        status_priority.get(x.get("status", ""), 99),
+                        (x.get("status") or "").lower()
+                    ),
+                    reverse=reverse
+                )
+            else:
+                filtered_rows.sort(
+                    key=lambda x: (x.get(sort_by) or "").lower(),
+                    reverse=reverse
+                )
         
         # ---------------------------
         # PAGINATION

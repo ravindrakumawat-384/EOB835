@@ -17,8 +17,8 @@ async def get_exception_files(
     user: Dict[str, Any] = Depends(get_current_user),
     search: Optional[str] = Query(None, description="Search by file name, error type, or description"),
     exception_type: Optional[str] = Query("all", description="Filter by exception type"),
-    # date_from: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
-    # date_to: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    sort_by: Optional[str] = Query("date"),
+    sort_dir: Optional[str] = Query("desc"),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=1000),
 ):
@@ -41,11 +41,13 @@ async def get_exception_files(
                         uf.original_filename AS fileName,
                         uf.original_filename AS original_filename,
                         COALESCE(p.name, '') AS payer,
+                        uf.processing_status AS status,
                         uf.processing_error_message AS description,
+                        uf.uploaded_at AS uploaded_at,
                         to_char(uf.uploaded_at, 'YYYY-MM-DD') AS date
                     FROM upload_files uf
                     LEFT JOIN payers p ON p.id = uf.detected_payer_id
-                    WHERE uf.org_id = %s AND (uf.processing_status = 'exception' OR uf.processing_error_message IS NOT NULL)
+                    WHERE uf.org_id = %s AND uf.processing_status IN ('failed', 'unreadable', 'ocr_failed', 'need_template', 'unmapped_payer')
                 """
                 params = [org_id]
 
@@ -58,39 +60,22 @@ async def get_exception_files(
                 cur.execute(query, tuple(params))
                 files = cur.fetchall()
 
-        # helper to map description to a short exception type code
-        def map_exception_type(desc: Optional[str]) -> str:
-            if not desc:
-                return "unknown"
-            d = desc.lower()
-            if "template" in d:
-                return "needs_template"
-            if "ocr" in d or "ocr failed" in d:
-                return "ocr_error"
-            if "unmapped" in d or "payer detected" in d:
-                return "unmapped_payer"
-            if "password" in d or "corrupt" in d or "corrupted" in d:
-                return "unreadable_pdf"
-            if "pending" in d or "review" in d or "pending_review" in d:
-                return "pending_review"
-            if "ai" in d or "processing" in d or "ai_processing" in d:
-                return "ai_processing"
-            return "other"
-
         # Build table data
         table_data = []
         for f in files:
             exc_desc = f.get("description") or ""
-            exc_type = map_exception_type(exc_desc)
+            # Use actual status from database
+            actual_status = f.get("status") or "unknown"
             # Ensure filename is available under both keys
             filename = f.get("fileName") or f.get("original_filename") or ""
             table_data.append({
                 "file_id": f.get("id"),
                 "fileName": filename,
                 "payer": f.get("payer") or "-",
-                "exceptionType": exc_type,
+                "exceptionType": actual_status,
                 "description": exc_desc or "-",
                 "date": f.get("date") or "-",
+                "uploaded_at": f.get("uploaded_at"),  # Keep original for sorting
                 "actions": {
                     "view_url": f"/exception-queue/files/{f.get('id')}/view",
                     "download_url": f"/exception-queue/files/{f.get('id')}/download"
@@ -104,15 +89,25 @@ async def get_exception_files(
             if exception_type and exception_type != "all":
                 if r.get("exceptionType") != exception_type:
                     continue
-            # date filters
-            # if date_from and r.get("date") < date_from:
-            #     continue
-            # if date_to and r.get("date") > date_to:
-            #     continue
             # search already applied in SQL, but keep additional safety
-            if search and s not in f"{r.get('fileName','')} {r.get('payer','')} {r.get('exceptionType','')} {r.get('description','') }".lower():
+            if search and s not in f"{r.get('fileName','')} {r.get('payer','')} {r.get('exceptionType','')} {r.get('description','')}".lower():
                 continue
             filtered.append(r)
+
+        # Apply sorting
+        valid_sort_fields = ["fileName", "payer", "exceptionType", "date"]
+        if sort_by in valid_sort_fields:
+            reverse = sort_dir.lower() == "desc"
+            if sort_by == "date":
+                filtered.sort(
+                    key=lambda x: x.get("uploaded_at") or datetime(1900, 1, 1),
+                    reverse=reverse
+                )
+            else:
+                filtered.sort(
+                    key=lambda x: (x.get(sort_by) or "").lower(),
+                    reverse=reverse
+                )
 
         total_records = len(filtered)
         total_pages = (total_records + page_size - 1) // page_size
@@ -123,12 +118,11 @@ async def get_exception_files(
         page_rows = filtered[start:end]
 
         table_headers = [
-            {"field": "fileName", "label": "File Name"},
-            {"field": "payer", "label": "Payer"},
-            {"field": "exceptionType", "label": "Exception Type", "mutlicell": True},
+            {"field": "fileName", "label": "File Name", "isSortable": True},
+            {"field": "payer", "label": "Payer", "isSortable": True},
+            {"field": "exceptionType", "label": "Exception Type", "isSortable": True},
             {"field": "description", "label": "Description"},
-            {"field": "date", "label": "Date", "isDate": True},
-            
+            {"field": "date", "label": "Date", "isDate": True, "isSortable": True},
             {"label": "Actions"},
         ]
 
